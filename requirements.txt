@@ -1,0 +1,11 @@
+langgraph
+langchain
+pandas
+numpy
+xgboost
+shap
+scikit-learn
+streamlit
+requests
+python-dotenv
+pydantic
