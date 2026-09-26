@@ -10,8 +10,9 @@ from src.agents.explainer_orchestrator_agent import agent as explainer_agent
 from src.schemas import PipelineResult, WeatherNewsOutput
 
 
-def run_pipeline(matieres: list[str], zone: str) -> PipelineResult:
+def run_pipeline(matieres: list[str], zone: str, horizon_mois: int = 1) -> PipelineResult:
     collector_output = collector_agent.run(matieres)
+
     try:
         weather_news_output = weather_news_agent.run(zone)
     except Exception as error:
@@ -23,7 +24,11 @@ def run_pipeline(matieres: list[str], zone: str) -> PipelineResult:
             is_synthetic=True,
             collection_errors=[str(error)],
         )
-    feature_predictor_output = feature_predictor_agent.run(collector_output, weather_news_output)
+
+    feature_predictor_output = feature_predictor_agent.run(
+        collector_output,
+        weather_news_output,
+    )
     explanations = explainer_agent.run(feature_predictor_output)
 
     return PipelineResult(
