@@ -1,10 +1,12 @@
+from src.agents.collector_agent.official_sources import Collector, latest_fred_observation
 from src.schemas import VariableOutput
 
 
 def run() -> VariableOutput:
-    """Sous-agent Prix International (T17, priorite 1)."""
-    # TODO: appeler API Banque mondiale/FMI (Commodity Markets Pink Sheet)
+    """Latest international aluminum benchmark, sourced directly from FRED."""
+    observed_on, value = latest_fred_observation(Collector(), "PALUMUSDM")
     return VariableOutput(
-        nom="prix_international", date="2026-09-01", valeur=0.0,
-        unite="USD", source="TODO", is_synthetic=True,
+        nom="prix_international", date=observed_on, valeur=value,
+        unite="USD/tonne aluminium (FRED PALUMUSDM)", source="FRED PALUMUSDM",
+        is_synthetic=False,
     )

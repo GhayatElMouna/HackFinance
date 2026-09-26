@@ -1,10 +1,12 @@
+from src.agents.collector_agent.official_sources import Collector, latest_wb_observation
 from src.schemas import VariableOutput
 
 
 def run() -> VariableOutput:
-    """Sous-agent USD/TND (T17, priorite 1)."""
-    # TODO: appeler API BCT (GOSDMX)
+    """Latest annual official USD/TND rate from the World Bank API."""
+    observed_on, value = latest_wb_observation(Collector(), "PA.NUS.FCRF")
     return VariableOutput(
-        nom="usd_tnd", date="2026-09-01", valeur=0.0,
-        unite="TND", source="TODO", is_synthetic=True,
+        nom="usd_tnd", date=observed_on, valeur=value,
+        unite="TND/USD (moyenne annuelle)",
+        source="World Bank PA.NUS.FCRF", is_synthetic=False,
     )

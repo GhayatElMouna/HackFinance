@@ -7,5 +7,9 @@ shap
 scikit-learn
 streamlit
 requests
+beautifulsoup4
+lxml
+openpyxl
+tenacity
 python-dotenv
 pydantic

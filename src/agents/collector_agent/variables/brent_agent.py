@@ -1,10 +1,11 @@
+from src.agents.collector_agent.official_sources import Collector, latest_fred_observation
 from src.schemas import VariableOutput
 
 
 def run() -> VariableOutput:
-    """Sous-agent Brent (T17, priorite 1)."""
-    # TODO: appeler API Banque mondiale/FMI ou Trading Economics
+    """Latest observed Europe Brent spot price from FRED."""
+    observed_on, value = latest_fred_observation(Collector(), "DCOILBRENTEU")
     return VariableOutput(
-        nom="brent", date="2026-09-01", valeur=0.0,
-        unite="$/baril", source="TODO", is_synthetic=True,
+        nom="brent", date=observed_on, valeur=value,
+        unite="USD/baril", source="FRED DCOILBRENTEU", is_synthetic=False,
     )
