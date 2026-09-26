@@ -9,7 +9,5 @@ streamlit
 requests
 python-dotenv
 pydantic
-statsmodels
-plotly
-worldbank-commodities
 openpyxl
+prophet
