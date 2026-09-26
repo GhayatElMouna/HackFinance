@@ -10,10 +10,14 @@ from src.agents.explainer_orchestrator_agent import agent as explainer_agent
 from src.schemas import PipelineResult
 
 
-def run_pipeline(matieres: list[str], zone: str) -> PipelineResult:
+def run_pipeline(matieres: list[str], zone: str, horizon_mois: int = 1) -> PipelineResult:
     collector_output = collector_agent.run(matieres)
     weather_news_output = weather_news_agent.run(zone)
-    feature_predictor_output = feature_predictor_agent.run(collector_output, weather_news_output)
+    feature_predictor_output = feature_predictor_agent.run(
+        collector_output,
+        weather_news_output,
+        horizon_mois=horizon_mois,
+    )
     explanations = explainer_agent.run(feature_predictor_output)
 
     return PipelineResult(

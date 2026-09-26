@@ -9,3 +9,5 @@ streamlit
 requests
 python-dotenv
 pydantic
+openpyxl
+prophet
