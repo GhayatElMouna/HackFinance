@@ -6,8 +6,10 @@ xgboost
 shap
 scikit-learn
 streamlit
+plotly>=5.20
 requests
 python-dotenv
-pydantic
-openpyxl
+pydantic>=2.0
+openpyxl>=3.1
 prophet
+pytest>=8.0
