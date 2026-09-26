@@ -4,9 +4,12 @@ Toute personne modifiant une structure ici doit prevenir l equipe
 (referent : Explicateur/orchestration).
 """
 from datetime import date
-from typing import List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
+
+
+AgentStatusLiteral = Literal["idle", "running", "done", "error"]
 
 
 # ---------- Sous-agents Variables ----------
@@ -50,6 +53,36 @@ class CollectorOutput(BaseModel):
     collection_errors: List[str] = Field(default_factory=list)
 
 
+# ---------- Agent Lois de Finances ----------
+
+class BudgetLine(BaseModel):
+    annee: int
+    poste: str
+    matiere: Optional[str] = None  # "petrole", "ble", ... ou None si transversal
+    montant_mdt: float             # millions de dinars
+    variation_pct: Optional[float] = None
+    commentaire: str = ""
+
+
+class FinanceLawYearSummary(BaseModel):
+    annee: int
+    source_document: str
+    total_subventions_mdt: Optional[float] = None
+    lignes: List[BudgetLine] = Field(default_factory=list)
+    resume: str = ""
+
+
+class FinanceLawOutput(BaseModel):
+    annees_analysees: List[int]
+    resumes_par_annee: List[FinanceLawYearSummary]
+    tendances_par_matiere: Dict[str, str] = Field(default_factory=dict)
+    features_budgetaires: Dict[str, float] = Field(default_factory=dict)
+    # ex: pression_budgetaire_petrole, variation_3ans_ble, ...
+    source_mode: str = "curated"  # curated | pdf | llm | hybrid
+    warnings: List[str] = Field(default_factory=list)
+    is_synthetic: bool = False
+
+
 # ---------- Agent Meteo/News ----------
 
 class NewsEvent(BaseModel):
@@ -83,6 +116,10 @@ class FeatureRow(BaseModel):
     moyenne_mobile_7j: Optional[float] = None
     volatilite_glissante: Optional[float] = None
     momentum: Optional[float] = None
+    # Facteurs issus de l'Agent Lois de Finances
+    depense_budget_mdt: Optional[float] = None
+    variation_budget_pct: Optional[float] = None
+    score_pression_budgetaire: Optional[float] = None
 
 
 class PredictionOutput(BaseModel):
@@ -103,10 +140,11 @@ class PredictionOutput(BaseModel):
     prix_bas: Optional[float] = None
     prix_haut: Optional[float] = None
     prix_prophet: Optional[float] = None
-    modele: str = "Prophet"
+    modele: str = "baseline_momentum"
     comparaison_modeles: dict[str, dict[str, float]] = Field(default_factory=dict)
     sensibilites_facteurs: dict[str, float] = Field(default_factory=dict)
     sensibilites_observations: dict[str, int] = Field(default_factory=dict)
+    budget_a_influence: bool = False
 
 
 class PriceForecastPoint(BaseModel):
@@ -167,10 +205,13 @@ class ExplainerOutput(BaseModel):
     matiere: str
     texte_explicatif: str
     feature_importances: dict   # poids indicatifs, pas des valeurs SHAP
+    budget_mentionne: bool = False
 
 
 class PipelineResult(BaseModel):
     collector: CollectorOutput
     weather_news: WeatherNewsOutput
+    lois_finances: Optional[FinanceLawOutput] = None
     feature_predictor: FeaturePredictorOutput
     explanations: List[ExplainerOutput]
+    agent_status: Dict[str, AgentStatusLiteral] = Field(default_factory=dict)

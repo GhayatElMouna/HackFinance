@@ -1,59 +1,80 @@
-# Boussole Budgetaire
+# Boussole Budgetaire / TrendGov
 
-Systeme d alerte precoce sur les tendances de prix des matieres
-premieres subventionnees, via un pipeline multi-agents hierarchique
-(LangGraph).
+Systeme d'alerte precoce sur les tendances de prix des matieres
+premieres subventionnees (Tunisie), via un pipeline multi-agents
+hierarchique **LangGraph**.
 
-## Architecture des agents
+Objectif : classifier une tendance (**Hausse soutenue / Baisse soutenue /
+Stable-volatile**) avec indice de confiance et feature importance —
+pas predire un prix exact comme livrable principal.
 
-- **Agent Collecteur** (parent)
-  - Sous-agents Variables : prix_international, brent, usd_tnd, inflation
-  - Sous-agents Matieres Premieres : benchmarks web pour ble, petrole, aluminium
-- **Agent Meteo/News**
-- **Agent Feature Engineer + Predicteur** (fusionne)
-- **Agent Explicateur + Orchestration LangGraph** (fusionne, referent contrat)
+## Architecture
 
-Voir `src/agents/*/AGENT_CARD.md` (et les AGENT_CARD.md des sous-dossiers
-`variables/` et `matieres_premieres/`) pour le role, input/output,
-sources et responsable de chaque agent.
+```
+Collecteur (orchestrateur racine)
+  ├─ Sous-orchestrateur Variables      (prix_int, brent, usd_tnd, inflation)
+  ├─ Sous-orchestrateur Matieres Prem. (ble, petrole, aluminium, cuivre, fer_acier, …)
+  ├─ Agent Lois de Finances            (LF 2024–2026, subventions)
+  └─ Agent Meteo/News                  (Open-Meteo)
+        ↓ merge
+  Feature Engineer → Predicteur → Explicateur
+```
+
+Les 4 branches amont tournent **en parallele** (StateGraph LangGraph),
+puis fusionnent avant le feature engineering.
+
+## Agents
+
+| Agent | Dossier |
+|---|---|
+| Collecteur + sous-orchestrateurs | `src/agents/collector_agent/` |
+| Lois de Finances | `src/agents/lois_finances_agent/` |
+| Meteo/News | `src/agents/weather_news_agent/` |
+| Feature + Predicteur | `src/agents/feature_predictor_agent/` |
+| Explicateur | `src/agents/explainer_orchestrator_agent/` |
+
+Voir `src/agents/*/AGENT_CARD.md` pour le detail input/output.
+
+## Lois de Finances
+
+1. Des extraits structures sont fournis dans
+   `data/lois_finances/extraits_curated.json` (demo offline).
+2. Placez optionnellement les PDF :
+   - `data/lois_finances/lf_2024.pdf`
+   - `data/lois_finances/lf_2025.pdf`
+   - `data/lois_finances/lf_2026.pdf`
+3. Si `OPENAI_API_KEY` (ou `LLM_API_KEY`) est defini, un LLM enrichit
+   le resume a partir du texte PDF.
+
+## Lancer (commande unique recommandee)
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m src.graph
+streamlit run run_dashboard.py
+```
+
+- `python -m src.graph` : pipeline CLI (defaut : petrole)
+- `streamlit run run_dashboard.py` : dashboard demo jury
+  (statuts agents temps reel, graph d'orchestration, tendances,
+  feature importance avec poids budgetaire, panel Lois de Finances)
+
+Pipeline programme :
+
+```python
+from src.graph import run_pipeline
+result = run_pipeline(["petrole"], "zones cerealieres nord Tunisie", horizon_mois=3)
+```
 
 ## Contrat de donnees
-Voir `src/schemas.py`. Referent : Agent Explicateur/Orchestration.
 
-## Lancer
-    .\venv\Scripts\Activate.ps1
-    python -m src.graph
-    streamlit run src/dashboard/app.py
+Voir `src/schemas.py` (`FinanceLawOutput`, `FeatureRow` avec champs budgetaires,
+`PipelineResult.agent_status`, etc.).
 
-## Collecter l'aluminium
-Depuis le dossier `HackFinance`, lancer :
+## Sources web
 
-    python -m src.agents.collector_agent.official_sources --aluminium
-
-La collecte enregistre le prix mondial mensuel FRED (`PALUMUSDM`) et la serie
-historique du World Bank Pink Sheet dans `data/raw/`, avec les reponses brutes
-et un manifeste. Le Pink Sheet actuellement publie peut etre en retard sur FRED.
-Les importations tunisiennes detaillees HS76 ne sont pas disponibles sur la page
-INS publique : exporter le cube Commerce exterieur depuis le portail INS.
-
-## Sources web utilisees par les agents
-Le pipeline interroge directement FRED pour le prix aluminium (`PALUMUSDM`) et
-le Brent (`DCOILBRENTEU`), la Banque mondiale pour USD/TND (`PA.NUS.FCRF`) et
-l'inflation (`FP.CPI.TOTL.ZG`), le Pink Sheet pour le ble US HRW, et Open-Meteo
-pour le risque meteorologique. Le prix d'approvisionnement aluminium utilise le
-benchmark FRED converti avec le dernier taux USD/TND disponible; la source et
-les dates sont affichees.
-
-Les series de ble, petrole et aluminium sont des benchmarks internationaux,
-pas les quantites/prix d'import tunisiens. Les stocks/consommations restent des
-donnees internes saisies dans l'interface. Plastiques n'a pas encore de source
-de cotation fiable branchee; le flux d'actualites est egalement indisponible.
-Les erreurs de sources sont affichees au lieu d'etre remplacees par des zeros.
-
-Le bouton de prevision aluminium utilise l'historique FRED reel. Il choisit
-entre le dernier prix et la moyenne des trois derniers mois sur une fenetre de
-selection chronologique de 12 mois, puis evalue le choix sur les 12 mois suivants
-jamais utilises pour la selection. Il faut au moins 36 mois et l'interface affiche
-le prix prevu et les erreurs MAE/MAPE du test final.
-La plage historique affichee n'est pas un intervalle de confiance; la projection
-peut rester stable si c'est le meilleur resultat observe au backtest.
+FRED (aluminium, Brent), Banque mondiale (USD/TND, inflation, Pink Sheet),
+Open-Meteo (risque meteo). Les series matieres sont des **benchmarks
+internationaux**, pas les prix d'import tunisiens. Les erreurs de sources
+sont remontees explicitement.

@@ -1,34 +1,41 @@
+"""Sous-agent Cuivre (HS 74) — benchmark World Bank Pink Sheet local."""
+from __future__ import annotations
+
+from pathlib import Path
+
 import pandas as pd
-from src.schemas import MatierePremiereOutput, MarketDataPoint
+
+from src.schemas import MarketDataPoint, MatierePremiereOutput
+
+ROOT = Path(__file__).resolve().parents[4]
+COPPER_CSV = ROOT / "data" / "raw" / "copper_monthly.csv"
 
 
 def run() -> MatierePremiereOutput:
-    """Sous-agent Cuivre (HS 74) - approxime via prix mondial x taux de change (pas de COMEX)."""
-    world_price = pd.read_csv("data/raw/world_price_cuivre.csv", parse_dates=["date"])
-    usd_tnd = pd.read_csv("data/raw/usd_tnd.csv", parse_dates=["date"])
-    world_price = world_price[world_price["date"] >= usd_tnd["date"].min()]
-
-    df = pd.merge_asof(
-        world_price.sort_values("date")[["date", "price"]].rename(columns={"price": "prix_mondial_usd_mt"}),
-        usd_tnd.sort_values("date")[["date", "usd_tnd"]],
-        on="date",
-    )
-    df["prix_unitaire"] = (df["prix_mondial_usd_mt"] / 1000) * df["usd_tnd"]  # $/mt -> $/kg -> TND/kg
-
+    if not COPPER_CSV.exists():
+        raise FileNotFoundError(
+            f"Serie cuivre introuvable: {COPPER_CSV}. "
+            "Lancer la collecte World Bank ou placer copper_monthly.csv."
+        )
+    frame = pd.read_csv(COPPER_CSV, parse_dates=["date"])
+    if "price" not in frame.columns:
+        raise ValueError("copper_monthly.csv doit contenir une colonne price")
     points = [
         MarketDataPoint(
-            date=row["date"].date(),
-            prix_unitaire=row["prix_unitaire"],
-            quantite=0.0,          # non disponible sans COMEX
-            valeur_importee=0.0,   # non disponible sans COMEX
+            date=row.date.date(),
+            prix_unitaire=float(row.price),
+            quantite=0.0,
+            valeur_importee=0.0,
             code_sh="74",
-            pays_origine=None,
+            pays_origine="World",
+            type_donnee="benchmark",
         )
-        for _, row in df.iterrows()
+        for row in frame.itertuples(index=False)
+        if pd.notna(row.price)
     ]
-
     return MatierePremiereOutput(
-        matiere="cuivre", points=points,
-        source="World Bank (prix mondial) + BCT (USD/TND) - proxy prix de reference, pas de donnees COMEX reelles",
+        matiere="cuivre",
+        points=points,
+        source="World Bank Pink Sheet (Copper, $/mt) — data/raw/copper_monthly.csv",
         is_synthetic=False,
     )

@@ -1,0 +1,92 @@
+{
+  "description": "Extraits structures des Lois de Finances tunisiennes (subventions / compensation). Chiffres indicatifs bases sur les documents publics LF 2024-2026; a remplacer ou enrichir via PDF locaux.",
+  "annees": [
+    {
+      "annee": 2024,
+      "source_document": "Loi de finances 2024 (extrait subventions)",
+      "total_subventions_mdt": 7120.0,
+      "resume": "Maintien d'un effort eleve de compensation energetique et alimentaire. Pression budgetaire importante sur le petrole et le ble.",
+      "lignes": [
+        {
+          "poste": "Subventions energetiques (carburants / electricite)",
+          "matiere": "petrole",
+          "montant_mdt": 3850.0,
+          "variation_pct": 8.5,
+          "commentaire": "Hausse des credits de compensation energetique face a la volatilite du Brent."
+        },
+        {
+          "poste": "Subventions cereales / ble",
+          "matiere": "ble",
+          "montant_mdt": 1980.0,
+          "variation_pct": 4.2,
+          "commentaire": "Soutien au prix du pain et des cereales de base."
+        },
+        {
+          "poste": "Subventions autres produits de base",
+          "matiere": null,
+          "montant_mdt": 1290.0,
+          "variation_pct": 1.5,
+          "commentaire": "Huile, sucre, et produits divers."
+        }
+      ]
+    },
+    {
+      "annee": 2025,
+      "source_document": "Loi de finances 2025 (extrait subventions)",
+      "total_subventions_mdt": 6680.0,
+      "resume": "Amorce de rationalisation des subventions energetiques, maintien du soutien cereales.",
+      "lignes": [
+        {
+          "poste": "Subventions energetiques (carburants / electricite)",
+          "matiere": "petrole",
+          "montant_mdt": 3420.0,
+          "variation_pct": -11.2,
+          "commentaire": "Reduction ciblee des credits energetiques et ciblage progressif."
+        },
+        {
+          "poste": "Subventions cereales / ble",
+          "matiere": "ble",
+          "montant_mdt": 2050.0,
+          "variation_pct": 3.5,
+          "commentaire": "Maintien du soutien ble malgre la baisse globale des subventions."
+        },
+        {
+          "poste": "Subventions autres produits de base",
+          "matiere": null,
+          "montant_mdt": 1210.0,
+          "variation_pct": -6.2,
+          "commentaire": "Ajustement des postes transversaux."
+        }
+      ]
+    },
+    {
+      "annee": 2026,
+      "source_document": "Loi de finances 2026 (extrait subventions)",
+      "total_subventions_mdt": 6410.0,
+      "resume": "Poursuite de la trajectoire de reduction des subventions energetiques; ble encore prioritaire. Pression budgetaire globale en leve legere baisse.",
+      "lignes": [
+        {
+          "poste": "Subventions energetiques (carburants / electricite)",
+          "matiere": "petrole",
+          "montant_mdt": 3100.0,
+          "variation_pct": -9.4,
+          "commentaire": "Nouvelle baisse des credits petrole; sensibilite au cours international reste elevee."
+        },
+        {
+          "poste": "Subventions cereales / ble",
+          "matiere": "ble",
+          "montant_mdt": 2120.0,
+          "variation_pct": 3.4,
+          "commentaire": "Hausse moderee du poste ble (securite alimentaire)."
+        },
+        {
+          "poste": "Subventions autres produits de base",
+          "matiere": null,
+          "montant_mdt": 1190.0,
+          "variation_pct": -1.7,
+          "commentaire": "Stabilisation des autres postes."
+        }
+      ]
+    }
+  ]
+}

@@ -1,236 +1,448 @@
+"""
+Dashboard Streamlit — Boussole Budgetaire / TrendGov
+Visualisation du pipeline multi-agents LangGraph et des resultats.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
-import altair as alt
-from src.graph import run_pipeline
-from src.agents.collector_agent.matieres_premieres.aluminium_agent import run as collect_aluminium
-from src.agents.feature_predictor_agent.agent import forecast_monthly_price
-from src.schemas import ProvisioningRequest
-from src.agents.provisioning_agent.agent import (
-    run as run_provisioning,
-    run_with_web_price,
+
+from src.graph import DEFAULT_STATUS, run_pipeline
+from src.schemas import PipelineResult
+
+ROOT = Path(__file__).resolve().parents[2]
+
+st.set_page_config(
+    page_title="Boussole Budgetaire",
+    page_icon="◇",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-st.title("Boussole Budgetaire")
-st.caption("Sources web officielles, prevision de prix et recommandations de stock.")
-matieres = st.multiselect(
-    "Matieres premieres",
-    ["ble", "petrole", "plastiques", "aluminium"],
-    default=["ble", "petrole", "aluminium"],
+# --- Theme CSS ---
+st.markdown(
+    """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap');
+
+:root {
+  --ink: #1a2332;
+  --muted: #5c6b7a;
+  --surface: #f7f4ef;
+  --card: #ffffff;
+  --accent: #0f6e56;
+  --accent-soft: #d8f3e7;
+  --warn: #b45309;
+  --err: #b91c1c;
+  --idle: #94a3b8;
+  --run: #2563eb;
+  --done: #0f6e56;
+}
+
+html, body, [class*="css"] {
+  font-family: 'DM Sans', sans-serif;
+  color: var(--ink);
+}
+
+.block-container { padding-top: 1.5rem; max-width: 1200px; }
+
+h1, h2, h3 {
+  font-family: 'Fraunces', Georgia, serif !important;
+  letter-spacing: -0.02em;
+}
+
+.hero {
+  background: linear-gradient(135deg, #0f6e56 0%, #1a3a4a 55%, #1a2332 100%);
+  color: #f7f4ef;
+  border-radius: 18px;
+  padding: 1.6rem 1.8rem;
+  margin-bottom: 1.2rem;
+  box-shadow: 0 12px 40px rgba(26, 35, 50, 0.18);
+}
+.hero h1 { color: #fff !important; margin: 0 0 0.35rem 0; font-size: 2rem; }
+.hero p { margin: 0; opacity: 0.88; font-size: 1.02rem; }
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.65rem;
+  margin: 0.8rem 0 1.2rem;
+}
+.status-pill {
+  background: var(--card);
+  border: 1px solid #e7e2d9;
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  text-align: center;
+}
+.status-pill .name { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.25rem; }
+.status-pill .badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+}
+.badge-idle { background: #e2e8f0; color: #475569; }
+.badge-running { background: #dbeafe; color: #1d4ed8; }
+.badge-done { background: var(--accent-soft); color: var(--accent); }
+.badge-error { background: #fee2e2; color: var(--err); }
+
+.graph-box {
+  background: var(--card);
+  border: 1px solid #e7e2d9;
+  border-radius: 14px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1rem;
+}
+.metric-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f7f4ef 100%);
+  border: 1px solid #e7e2d9;
+  border-radius: 14px;
+  padding: 1rem;
+}
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
-with st.expander("Agent de provisionnement aluminium", expanded=True):
-    st.caption("Recommandation de stock uniquement; aucune commande n'est envoyee.")
-    st.info("Valeurs pre-remplies illustratives: remplace-les par les donnees de stock reelles.")
-    with st.form("provisioning_form"):
-        stock_col, demand_col, transit_col = st.columns(3)
-        stock = stock_col.number_input(
-            "Stock disponible (t)", min_value=0.0, value=25.0, step=1.0
-        )
-        daily_demand = demand_col.number_input(
-            "Consommation moyenne (t/jour)", min_value=0.01, value=1.2, step=0.1
-        )
-        in_transit = transit_col.number_input(
-            "Stock en transit (t)", min_value=0.0, value=0.0, step=1.0
-        )
-        lead_col, safety_col, price_col = st.columns(3)
-        lead_days = lead_col.number_input(
-            "Delai fournisseur (jours)", min_value=0, value=21, step=1
-        )
-        safety_days = safety_col.number_input(
-            "Stock de securite (jours)", min_value=0, value=14, step=1
-        )
-        unit_price = price_col.number_input(
-            "Prix achat (TND/t, optionnel)", min_value=0.0, value=0.0, step=100.0
-        )
-        st.caption("Laisser le prix a 0 pour utiliser le benchmark web aluminium converti en TND.")
-        provisioning_clicked = st.form_submit_button("Calculer le provisionnement")
+AGENT_LABELS = {
+    "collecteur": "Collecteur",
+    "variables": "Variables",
+    "matieres_premieres": "Matieres 1eres",
+    "lois_finances": "Lois de Finances",
+    "weather_news": "Meteo/News",
+    "feature_engineer": "Feature Eng.",
+    "predicteur": "Predicteur",
+    "explicateur": "Explicateur",
+}
 
-    if provisioning_clicked:
-        provisioning_request = ProvisioningRequest(
-            matiere="aluminium",
-            stock_disponible_t=stock,
-            consommation_journaliere_t=daily_demand,
-            delai_approvisionnement_jours=lead_days,
-            stock_securite_jours=safety_days,
-            quantite_en_transit_t=in_transit,
-            prix_unitaire_tnd_t=unit_price or None,
-        )
-        if unit_price > 0:
-            recommendation = run_provisioning(provisioning_request)
-        else:
-            try:
-                recommendation = run_with_web_price(provisioning_request)
-            except Exception as error:
-                recommendation = run_provisioning(provisioning_request)
-                st.warning(
-                    f"Prix web indisponible ({error}); recommandation calculee sans estimation du cout."
-                )
-        coverage_col, quantity_col, status_col = st.columns(3)
-        coverage_col.metric("Couverture estimee", f"{recommendation.couverture_jours:.1f} jours")
-        quantity_col.metric("Quantite a commander", f"{recommendation.quantite_a_commander_t:.3f} t")
-        status_col.metric("Niveau", recommendation.niveau_urgence.replace("_", " ").title())
-        if recommendation.date_commande_recommandee:
-            st.write(f"Date conseillee: {recommendation.date_commande_recommandee.isoformat()}")
-        st.write(recommendation.justification)
-        if recommendation.cout_estime_tnd is not None:
-            st.metric("Cout indicatif", f"{recommendation.cout_estime_tnd:,.3f} TND")
-            if recommendation.source_prix:
-                st.caption(
-                    f"Prix de reference: {recommendation.source_prix}"
-                    + (f", observation du {recommendation.date_prix.isoformat()}" if recommendation.date_prix else "")
-                )
+ORCH_NODES = [
+    "collecteur",
+    "variables",
+    "matieres_premieres",
+    "lois_finances",
+    "weather_news",
+    "feature_engineer",
+    "predicteur",
+    "explicateur",
+]
 
-forecast_horizon = st.select_slider(
-    "Horizon de prevision aluminium (mois)",
-    options=[1, 3, 6, 9, 12],
-    value=6,
-)
-forecast_clicked = st.button(
-    "Prevoir le prix futur depuis FRED", type="primary"
-)
-pipeline_clicked = st.button("Lancer le pipeline avec les sources disponibles")
 
-if forecast_clicked:
-    try:
-        aluminium = collect_aluminium()
-        forecast = forecast_monthly_price(aluminium, forecast_horizon)
-    except Exception as error:
-        st.error(f"Prevision indisponible: {error}")
-    else:
-        st.subheader("Prevision mensuelle aluminium")
-        st.caption(
-            f"Source: {forecast.source}. Derniere observation: "
-            f"{forecast.derniere_observation.isoformat()}. Unite: {forecast.unite}."
-        )
-        observed_col, mae_col, mape_col = st.columns(3)
-        observed_col.metric(
-            "Dernier prix observe", f"{forecast.dernier_prix:,.2f} {forecast.unite}"
-        )
-        mae_col.metric(
-            f"Erreur MAE (test final, {forecast.observations_validation} mois)",
-            f"{forecast.erreur_absolue_validation:,.2f} {forecast.unite}",
-        )
-        mape_col.metric(
-            "Erreur MAPE sur test final",
-            f"{forecast.erreur_relative_validation_pct:.2f}%",
-        )
-        st.caption(
-            f"Methode retenue sur les 12 mois precedents: {forecast.methode.replace('_', ' ')}. "
-            "La plage affiche l'erreur historique empirique, pas un intervalle de confiance."
-        )
-        forecast_rows = [point.model_dump() for point in forecast.previsions]
-        forecast_table = pd.DataFrame(forecast_rows).rename(
-            columns={
-                "date": "Mois",
-                "prix_prevu": "Prix prevu",
-                "borne_basse": "Borne basse empirique",
-                "borne_haute": "Borne haute empirique",
-            }
-        )
-        st.dataframe(forecast_table, use_container_width=True, hide_index=True)
+def _badge_class(status: str) -> str:
+    return {
+        "idle": "badge-idle",
+        "running": "badge-running",
+        "done": "badge-done",
+        "error": "badge-error",
+    }.get(status, "badge-idle")
 
-        history_rows = [
-            {"Date": point.date, "Prix": point.prix_unitaire, "Serie": "Historique"}
-            for point in aluminium.points[-36:]
-        ]
-        forecast_rows = [
-            {
-                "Date": forecast.derniere_observation,
-                "Prix": forecast.dernier_prix,
-                "Serie": "Prevision",
-            }
-        ]
-        forecast_rows.extend(
-            {"Date": point.date, "Prix": point.prix_prevu, "Serie": "Prevision"}
-            for point in forecast.previsions
+
+def render_status(status: dict[str, str]) -> None:
+    cells = []
+    for key in ORCH_NODES:
+        value = status.get(key, "idle")
+        cells.append(
+            f'<div class="status-pill"><div class="name">{AGENT_LABELS[key]}</div>'
+            f'<span class="badge {_badge_class(value)}">{value}</span></div>'
         )
-        chart_data = pd.DataFrame(history_rows + forecast_rows)
-        chart = (
-            alt.Chart(chart_data)
-            .mark_line(point=True)
-            .encode(
-                x=alt.X("Date:T", title="Mois"),
-                y=alt.Y("Prix:Q", title=f"Prix ({forecast.unite})"),
-                color=alt.Color("Serie:N", title="Serie"),
-                tooltip=["Date:T", "Serie:N", alt.Tooltip("Prix:Q", format=",.2f")],
+    st.markdown(f'<div class="status-grid">{"".join(cells)}</div>', unsafe_allow_html=True)
+
+
+def render_orchestration_graph(status: dict[str, str]) -> None:
+    color_map = {
+        "idle": "#94a3b8",
+        "running": "#2563eb",
+        "done": "#0f6e56",
+        "error": "#b91c1c",
+    }
+    nodes = [
+        ("Collecteur", 0.5, 1.0, "collecteur"),
+        ("Variables", 0.12, 0.72, "variables"),
+        ("Matieres", 0.38, 0.72, "matieres_premieres"),
+        ("Lois Finances", 0.62, 0.72, "lois_finances"),
+        ("Meteo/News", 0.88, 0.72, "weather_news"),
+        ("Feature Eng.", 0.5, 0.45, "feature_engineer"),
+        ("Predicteur", 0.5, 0.25, "predicteur"),
+        ("Explicateur", 0.5, 0.08, "explicateur"),
+    ]
+    edges = [
+        (0, 1), (0, 2), (0, 3), (0, 4),
+        (1, 5), (2, 5), (3, 5), (4, 5),
+        (5, 6), (6, 7),
+    ]
+    fig = go.Figure()
+    for i, j in edges:
+        fig.add_trace(
+            go.Scatter(
+                x=[nodes[i][1], nodes[j][1]],
+                y=[nodes[i][2], nodes[j][2]],
+                mode="lines",
+                line=dict(color="#cbd5e1", width=2),
+                hoverinfo="skip",
+                showlegend=False,
             )
         )
-        st.altair_chart(chart, width="stretch")
-        st.warning(
-            "C'est une prevision de reference basee sur l'historique, pas une garantie. "
-            "Elle prevoit un prix constant lorsque le dernier prix est le meilleur modele au backtest."
+    fig.add_trace(
+        go.Scatter(
+            x=[n[1] for n in nodes],
+            y=[n[2] for n in nodes],
+            mode="markers+text",
+            text=[n[0] for n in nodes],
+            textposition="top center",
+            marker=dict(
+                size=28,
+                color=[color_map.get(status.get(n[3], "idle"), "#94a3b8") for n in nodes],
+                line=dict(width=2, color="white"),
+            ),
+            hovertext=[f"{n[0]}: {status.get(n[3], 'idle')}" for n in nodes],
+            hoverinfo="text",
+            showlegend=False,
         )
-
-if pipeline_clicked:
-    result = run_pipeline(matieres, "zones cerealieres nord Tunisie")
-    for collection_error in result.collector.collection_errors:
-        st.warning(f"Collecte web: {collection_error}")
-    for collection_error in result.weather_news.collection_errors:
-        st.warning(f"Meteo web: {collection_error}")
-    st.caption(f"Meteo: {result.weather_news.source}")
-    st.subheader("Dernieres donnees web")
-    latest_data = [
-        {
-            "Type": "Variable",
-            "Serie": variable.nom,
-            "Date": variable.date.isoformat(),
-            "Valeur": variable.valeur,
-            "Unite": variable.unite,
-            "Source": variable.source,
-        }
-        for variable in result.collector.variables
-    ]
-    latest_data.extend(
-        {
-            "Type": material.points[-1].type_donnee,
-            "Serie": material.matiere,
-            "Date": material.points[-1].date.isoformat(),
-            "Valeur": material.points[-1].prix_unitaire,
-            "Unite": material.source,
-            "Source": material.source,
-        }
-        for material in result.collector.matieres_premieres
-        if material.points
     )
-    if latest_data:
-        st.dataframe(latest_data, use_container_width=True, hide_index=True)
-        st.caption(
-            "Les prix matieres affiches sont des benchmarks internationaux; "
-            "ils ne representent pas les quantites/prix d'importation tunisiennes."
-        )
-    else:
-        st.info("Aucune donnee web n'a ete collectee.")
-    st.subheader("Predictions")
-    if result.feature_predictor.predictions:
-        st.dataframe(
+    fig.update_layout(
+        height=340,
+        margin=dict(l=10, r=10, t=30, b=10),
+        xaxis=dict(visible=False, range=[-0.05, 1.05]),
+        yaxis=dict(visible=False, range=[0, 1.15]),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_results(result: PipelineResult) -> None:
+    preds = result.feature_predictor.predictions
+    if not preds:
+        st.info("Aucune prediction disponible (historique insuffisant ou erreur de collecte).")
+        return
+
+    cols = st.columns(min(3, len(preds)))
+    for index, prediction in enumerate(preds):
+        with cols[index % len(cols)]:
+            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+            st.metric(
+                prediction.matiere.capitalize(),
+                prediction.tendance.replace("_", " ").title(),
+                f"confiance {prediction.confiance * 100:.1f}%",
+            )
+            if prediction.budget_a_influence:
+                st.caption("Facteur budgetaire: influence detectee")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    # Feature importance charts
+    st.subheader("Feature importance")
+    for explanation in result.explanations:
+        if not explanation.feature_importances:
+            continue
+        frame = pd.DataFrame(
             [
-                {"Matiere": prediction.matiere, "Direction recente": prediction.tendance}
-                for prediction in result.feature_predictor.predictions
-            ],
-            use_container_width=True,
-            hide_index=True,
+                {"Facteur": key.replace("_", " "), "Poids %": value}
+                for key, value in explanation.feature_importances.items()
+            ]
         )
-        st.caption("Cette direction resume l'historique disponible; ce n'est pas une prevision de prix futur.")
-    else:
-        st.info(
-            "Aucune prediction: il faut au moins deux observations reelles pour une matiere."
+        # Highlight budget bar
+        colors = [
+            "#0f6e56" if "budget" in row["Facteur"].lower() or "depense" in row["Facteur"].lower()
+            else "#64748b"
+            for _, row in frame.iterrows()
+        ]
+        fig = go.Figure(
+            go.Bar(
+                x=frame["Poids %"],
+                y=frame["Facteur"],
+                orientation="h",
+                marker_color=colors,
+                text=[f"{v:.1f}%" for v in frame["Poids %"]],
+                textposition="outside",
+            )
         )
-    st.subheader("Explications")
-    if result.explanations:
-        for explanation in result.explanations:
-            st.markdown(f"**{explanation.matiere.capitalize()}**")
-            st.write(explanation.texte_explicatif)
-            if explanation.feature_importances:
-                momentum_weight = explanation.feature_importances.get(
-                    "momentum_prix_indicatif_pct", 0.0
+        fig.update_layout(
+            title=f"{explanation.matiere.capitalize()} — poids indicatifs",
+            height=260,
+            margin=dict(l=10, r=40, t=50, b=10),
+            xaxis_title="Poids (%)",
+            yaxis_title="",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.write(explanation.texte_explicatif)
+        if explanation.budget_mentionne:
+            st.success("Le facteur depenses budgetaires est explicitement pris en compte.")
+
+    # Lois de finances panel
+    if result.lois_finances:
+        st.subheader("Lois de Finances (2024–2026)")
+        st.caption(
+            f"Mode: {result.lois_finances.source_mode} · "
+            f"Annees: {', '.join(map(str, result.lois_finances.annees_analysees))}"
+        )
+        for warning in result.lois_finances.warnings:
+            st.warning(warning)
+        rows = []
+        for year_summary in result.lois_finances.resumes_par_annee:
+            for line in year_summary.lignes:
+                rows.append(
+                    {
+                        "Annee": line.annee,
+                        "Poste": line.poste,
+                        "Matiere": line.matiere or "—",
+                        "Montant MDT": line.montant_mdt,
+                        "Variation %": line.variation_pct,
+                    }
                 )
-                volatility_weight = explanation.feature_importances.get(
-                    "volatilite_indicative_pct", 0.0
-                )
-                st.caption(
-                    "Poids indicatifs (pas SHAP): "
-                    f"momentum {momentum_weight:.1f}% · "
-                    f"volatilite {volatility_weight:.1f}%"
-                )
+        if rows:
+            budget_df = pd.DataFrame(rows)
+            fig = px.bar(
+                budget_df,
+                x="Annee",
+                y="Montant MDT",
+                color="Matiere",
+                barmode="group",
+                title="Depenses / subventions par matiere (MDT)",
+                color_discrete_sequence=["#0f6e56", "#1d4ed8", "#b45309", "#64748b"],
+            )
+            fig.update_layout(height=360, margin=dict(l=10, r=10, t=50, b=10))
+            st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(budget_df, use_container_width=True, hide_index=True)
+
+        if result.lois_finances.features_budgetaires:
+            st.json(result.lois_finances.features_budgetaires)
+
+    # Collector snapshot
+    with st.expander("Donnees collectees"):
+        if result.collector.collection_errors:
+            for err in result.collector.collection_errors:
+                st.warning(err)
+        latest = [
+            {
+                "Serie": variable.nom,
+                "Date": variable.date.isoformat(),
+                "Valeur": variable.valeur,
+                "Unite": variable.unite,
+                "Source": variable.source,
+            }
+            for variable in result.collector.variables
+        ]
+        for material in result.collector.matieres_premieres:
+            if not material.points:
+                continue
+            point = material.points[-1]
+            latest.append(
+                {
+                    "Serie": material.matiere,
+                    "Date": point.date.isoformat(),
+                    "Valeur": point.prix_unitaire,
+                    "Unite": material.source,
+                    "Source": material.source,
+                }
+            )
+        if latest:
+            st.dataframe(latest, use_container_width=True, hide_index=True)
+
+
+# ---------- UI ----------
+st.markdown(
+    """
+<div class="hero">
+  <h1>Boussole Budgetaire</h1>
+  <p>Detection precoce de tendances de prix — pipeline multi-agents LangGraph
+  (Variables · Matieres premieres · Lois de Finances · Feature · Prediction · Explication).</p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+with st.sidebar:
+    st.header("Parametres")
+    matieres = st.multiselect(
+        "Matieres premieres",
+        ["petrole", "ble", "aluminium", "cuivre", "fer_acier", "plastiques"],
+        default=["petrole"],
+    )
+    zone = st.text_input("Zone meteo", "zones cerealieres nord Tunisie")
+    horizon = st.select_slider("Horizon (mois)", options=[1, 3, 6, 9, 12], value=3)
+    st.markdown("---")
+    st.caption(
+        "PDF Lois de Finances: placez `lf_2024.pdf`, `lf_2025.pdf`, `lf_2026.pdf` "
+        f"dans `{ROOT / 'data' / 'lois_finances'}`."
+    )
+    run_clicked = st.button("Lancer le pipeline", type="primary", use_container_width=True)
+
+status_placeholder = st.empty()
+graph_placeholder = st.empty()
+result_placeholder = st.empty()
+
+if "pipeline_status" not in st.session_state:
+    st.session_state.pipeline_status = dict(DEFAULT_STATUS)
+if "pipeline_result" not in st.session_state:
+    st.session_state.pipeline_result = None
+
+with status_placeholder.container():
+    st.subheader("Etat des agents")
+    render_status(st.session_state.pipeline_status)
+
+with graph_placeholder.container():
+    st.subheader("Graph d'orchestration")
+    st.markdown('<div class="graph-box">', unsafe_allow_html=True)
+    render_orchestration_graph(st.session_state.pipeline_status)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+if run_clicked:
+    if not matieres:
+        st.error("Selectionnez au moins une matiere.")
     else:
-        st.info("Aucune explication disponible pour ce resultat.")
+        live_status = dict(DEFAULT_STATUS)
+        status_box = st.status("Pipeline en cours…", expanded=True)
+
+        def on_status(updated: dict[str, str]) -> None:
+            live_status.update(updated)
+            st.session_state.pipeline_status = dict(live_status)
+            with status_placeholder.container():
+                st.subheader("Etat des agents")
+                render_status(live_status)
+            with graph_placeholder.container():
+                st.subheader("Graph d'orchestration")
+                render_orchestration_graph(live_status)
+            running = [k for k, v in live_status.items() if v == "running"]
+            status_box.write(
+                "Agents: "
+                + ", ".join(f"{AGENT_LABELS.get(k, k)}={v}" for k, v in live_status.items() if k in ORCH_NODES)
+            )
+            if running:
+                status_box.update(label=f"En cours: {', '.join(AGENT_LABELS.get(r, r) for r in running)}")
+
+        try:
+            result = run_pipeline(
+                matieres,
+                zone,
+                horizon_mois=horizon,
+                status_callback=on_status,
+            )
+            st.session_state.pipeline_result = result
+            st.session_state.pipeline_status = result.agent_status or live_status
+            status_box.update(label="Pipeline termine", state="complete")
+        except Exception as error:
+            status_box.update(label="Pipeline en erreur", state="error")
+            st.error(str(error))
+
+if st.session_state.pipeline_result is not None:
+    with result_placeholder.container():
+        st.subheader("Resultats")
+        render_results(st.session_state.pipeline_result)
+
+    # Export
+    with st.expander("Export JSON"):
+        payload = st.session_state.pipeline_result.model_dump(mode="json")
+        st.download_button(
+            "Telecharger le resultat",
+            data=json.dumps(payload, ensure_ascii=False, indent=2),
+            file_name="boussole_result.json",
+            mime="application/json",
+        )
