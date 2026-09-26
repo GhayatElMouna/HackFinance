@@ -139,7 +139,7 @@ class ProvisioningOutput(BaseModel):
 class ExplainerOutput(BaseModel):
     matiere: str
     texte_explicatif: str
-    feature_importances: dict   # {nom_feature: importance}
+    feature_importances: dict   # poids indicatifs, pas des valeurs SHAP
 
 
 class PipelineResult(BaseModel):

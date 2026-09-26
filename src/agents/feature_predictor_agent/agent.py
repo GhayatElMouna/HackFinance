@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import calendar
-from datetime import date
+from datetime import date, timedelta
 from math import isfinite
 from statistics import fmean, median, pstdev
 
@@ -156,6 +156,14 @@ def forecast_monthly_price(
             f"Il faut au moins {MIN_FORECAST_OBSERVATIONS} mois valides; "
             f"historique disponible: {len(observations)}"
         )
+    last_date = observations[-1][0]
+    reference_date = today or date.today()
+    max_age_days = 45 if material.matiere == "petrole" else 120
+    if reference_date - last_date > timedelta(days=max_age_days):
+        raise ValueError(
+            f"Derniere observation trop ancienne ({last_date.isoformat()}); "
+            "prevision non publiee pour une serie perimee"
+        )
 
     prices = [value for _, value in observations]
     selection_start = len(prices) - 2 * VALIDATION_HORIZON
@@ -193,7 +201,7 @@ def forecast_monthly_price(
         holdout_percentage_errors.append(error / actual * 100)
 
     last_date, last_price = observations[-1]
-    forecast_anchor = max(last_date, today or date.today())
+    forecast_anchor = max(last_date, reference_date)
     first_future_month = _next_month(
         date(forecast_anchor.year, forecast_anchor.month, 1), 1
     )

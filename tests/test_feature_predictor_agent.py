@@ -132,6 +132,28 @@ class AluminiumPredictionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "au moins 36 mois"):
             forecast_monthly_price(short_history)
 
+    def test_monthly_forecast_rejects_stale_history(self):
+        points = []
+        for index in range(36):
+            month_number = 2023 * 12 + index
+            year, month_index = divmod(month_number, 12)
+            points.append(
+                MarketDataPoint(
+                    date=date(year, month_index + 1, 1),
+                    prix_unitaire=100.0 + index,
+                    quantite=0.0,
+                    valeur_importee=0.0,
+                    code_sh="GLOBAL",
+                    type_donnee="benchmark",
+                )
+            )
+        stale_material = MatierePremiereOutput(
+            matiere="ble", points=points, source="stale fixture", is_synthetic=False
+        )
+
+        with self.assertRaisesRegex(ValueError, "Derniere observation trop ancienne"):
+            forecast_monthly_price(stale_material, today=date(2026, 9, 26))
+
 
 if __name__ == "__main__":
     unittest.main()

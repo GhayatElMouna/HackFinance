@@ -210,13 +210,27 @@ if pipeline_clicked:
             use_container_width=True,
             hide_index=True,
         )
-        st.caption("Cette direction resume les derniers cours; ce n'est pas une prevision de prix futur.")
+        st.caption("Cette direction resume l'historique disponible; ce n'est pas une prevision de prix futur.")
     else:
         st.info(
             "Aucune prediction: il faut au moins deux observations reelles pour une matiere."
         )
     st.subheader("Explications")
     if result.explanations:
-        st.write(result.explanations)
+        for explanation in result.explanations:
+            st.markdown(f"**{explanation.matiere.capitalize()}**")
+            st.write(explanation.texte_explicatif)
+            if explanation.feature_importances:
+                momentum_weight = explanation.feature_importances.get(
+                    "momentum_prix_indicatif_pct", 0.0
+                )
+                volatility_weight = explanation.feature_importances.get(
+                    "volatilite_indicative_pct", 0.0
+                )
+                st.caption(
+                    "Poids indicatifs (pas SHAP): "
+                    f"momentum {momentum_weight:.1f}% · "
+                    f"volatilite {volatility_weight:.1f}%"
+                )
     else:
         st.info("Aucune explication disponible pour ce resultat.")
