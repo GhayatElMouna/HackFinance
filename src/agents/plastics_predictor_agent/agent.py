@@ -411,7 +411,15 @@ def run(pink_sheet: str | Path | None = None, imports: str | Path | None = None,
         "prix_central": prediction.prix_central,
         "prix_haut": prediction.prix_haut,
         "tendance": prediction.tendance,
-        "modele_retenu": prediction.metriques.get("modele_retenu", "inconnu"),
+        "modele_retenu": (
+            prediction.metriques.get("modele_retenu")
+            if prediction.metriques.get("modele_retenu") is not None
+            else (
+                prediction.metriques.get("selection", {}).get("modele_retenu")
+                if isinstance(prediction.metriques.get("selection"), dict)
+                else "inconnu"
+            )
+        ),
         "couverture_calibree": prediction.metriques.get("modele", {}).get(
             "couverture_calibree_walk_forward"
         ),

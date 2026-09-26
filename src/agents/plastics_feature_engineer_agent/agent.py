@@ -241,8 +241,6 @@ def _series_features(target: pd.Series, energy: pd.DataFrame, index: pd.Datetime
     for horizon in (1, 3, 6, 12):
         frame[f"target_delta_{horizon}m"] = log_target.shift(-horizon) - log_target
         frame[f"baseline_brent_delta_{horizon}m"] = brent - brent.shift(horizon)
-    frame["target_delta_3m"] = frame["target_delta_3m"]
-    frame["baseline_brent_delta_3m"] = frame["baseline_brent_delta_3m"]
     frame.index.name = "date"
     return frame.replace([np.inf, -np.inf], np.nan)
 
