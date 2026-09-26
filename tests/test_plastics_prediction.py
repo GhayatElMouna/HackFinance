@@ -20,6 +20,11 @@ from src.agents.plastics_predictor_agent.agent import (
     run,
 )
 from src.agents.plastics_predictor_agent.schema import PlasticsPredictionOutput
+from src.dashboard.plastics_tools import (
+    convert_reference_band,
+    proxy_index,
+    validate_uploaded_csv,
+)
 
 
 def _energy_data(months: int = 240) -> pd.DataFrame:
@@ -31,6 +36,7 @@ def _energy_data(months: int = 240) -> pd.DataFrame:
         "Crude_average": 30 + step * 0.10 + 3 * np.sin(step / 8),
         "Gas_Europe": 5 + step * 0.025 + np.sin(step / 6),
         "Gas_US": 3 + step * 0.012 + 0.4 * np.sin(step / 5),
+        "Coal": 80 + step * 0.35 + 2 * np.sin(step / 9),
         "Saison": dates.month,
     })
 
@@ -47,7 +53,9 @@ def test_features_at_date_do_not_depend_on_future_rows() -> None:
     before = original.loc[original["date"] == cutoff, columns].to_numpy(dtype=float)
     after = revised.loc[revised["date"] == cutoff, columns].to_numpy(dtype=float)
     np.testing.assert_allclose(before, after, equal_nan=True)
-    assert "target_delta_3m" not in columns
+    assert not any(column.startswith("target_delta_") for column in columns)
+    assert "Coal" in original.columns
+    assert "Coal" not in columns
 
 
 def test_brent_baseline_uses_only_the_previous_three_months() -> None:
@@ -56,8 +64,13 @@ def test_brent_baseline_uses_only_the_previous_three_months() -> None:
     reference = pd.Timestamp("2015-06-01")
     current = energy.loc[energy["Date"] == reference, "Brent"].iloc[0]
     previous = energy.loc[energy["Date"] == reference - pd.DateOffset(months=3), "Brent"].iloc[0]
-    stored = table.loc[table["date"] == reference, "baseline_brent_delta_3m"].iloc[0]
-    assert np.isclose(stored, np.log(current) - np.log(previous))
+    for horizon in (1, 3, 6, 12):
+        previous_date = reference - pd.DateOffset(months=horizon)
+        previous = energy.loc[energy["Date"] == previous_date, "Brent"].iloc[0]
+        stored = table.loc[
+            table["date"] == reference, f"baseline_brent_delta_{horizon}m"
+        ].iloc[0]
+        assert np.isclose(stored, np.log(current) - np.log(previous))
 
 
 def test_scenarios_follow_proxy_formula_and_brent_order() -> None:
@@ -86,6 +99,32 @@ def test_model_selection_falls_back_when_candidates_do_not_beat_no_change() -> N
     assert _select_model(candidates, 0.115) == "ridge"
 
 
+def test_proxy_formula_uses_independent_2010_normalization() -> None:
+    assert np.isclose(proxy_index(20.0, 4.0, 10.0, 2.0), 200.0)
+
+
+def test_t17_declared_price_conversion_scales_reference_band() -> None:
+    band = convert_reference_band(5.0, 80.0, 100.0, 120.0, 100.0)
+    assert band == {"bas": 4.0, "central": 5.0, "haut": 6.0}
+
+
+def test_uploaded_csv_validation_requires_fields_and_2010_base() -> None:
+    valid = pd.DataFrame({
+        "Date": ["2010-01-01", "2011-01-01"],
+        "Brent": [80.0, 90.0],
+        "Crude_average": [75.0, 85.0],
+        "Gas_Europe": [8.0, 9.0],
+        "Gas_US": [4.0, 5.0],
+        "Coal": [100.0, 110.0],
+    })
+    canonical = validate_uploaded_csv(valid)
+    assert canonical["Date"].iloc[0] == pd.Timestamp("2010-01-01")
+    with np.testing.assert_raises_regex(ValueError, "Colonnes requises absentes"):
+        validate_uploaded_csv(valid.drop(columns=["Gas_US"]))
+    with np.testing.assert_raises_regex(ValueError, "annee 2010"):
+        validate_uploaded_csv(valid.iloc[[1]])
+
+
 def test_imports_switch_target_and_keep_code_series() -> None:
     energy = _energy_data(96)
     dates = pd.date_range("2000-01-01", periods=96, freq="MS")
@@ -105,11 +144,12 @@ def test_imports_switch_target_and_keep_code_series() -> None:
 def test_source_discovery_does_not_mistake_comex_for_pink_sheet(tmp_path) -> None:
     (tmp_path / "plastiques_comex.csv").touch()
     (tmp_path / "pinksheet_mensuelle.xlsx").touch()
+    (tmp_path / "pink_sheet_televerse.csv").touch()
 
     sources = discover_sources(tmp_path)
 
     assert sources["imports"].name == "plastiques_comex.csv"
-    assert sources["pink_sheet"].name == "pinksheet_mensuelle.xlsx"
+    assert sources["pink_sheet"].name == "pink_sheet_televerse.csv"
 
 
 def test_quantile_order_and_json_contract() -> None:
@@ -145,6 +185,10 @@ def test_cli_pipeline_writes_feature_prediction_and_importance_files(tmp_path) -
     assert features_path.exists()
     assert prediction_path.exists()
     assert importance_path.exists()
+    history_path = output_dir / "historique_previsions.csv"
+    assert history_path.exists()
+    assert [item.horizon_mois for item in predictions] == [1, 3, 6, 12]
+    assert all(item.prix_bas <= item.prix_central <= item.prix_haut for item in predictions)
     saved = json.loads(prediction_path.read_text(encoding="utf-8"))
     assert saved[0]["cible_utilisee"] == "indice_cout_proxy_base_100_2010"
     assert saved[0]["prix_bas"] <= saved[0]["prix_central"] <= saved[0]["prix_haut"]

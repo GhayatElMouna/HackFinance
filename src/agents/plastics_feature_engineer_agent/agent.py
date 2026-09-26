@@ -18,6 +18,7 @@ ENERGY_ALIASES = {
     "Gas_Europe": ("gaseurope", "europegas"),
     "Gas_US": ("gasus", "usgas", "henryhub"),
 }
+CONTEXT_ALIASES = {"Coal": ("coal",)}
 
 
 def _normalise_name(value: Any) -> str:
@@ -94,7 +95,7 @@ def prepare_energy(frame: pd.DataFrame) -> pd.DataFrame:
     date_col = _date_column(frame)
     dates = _month_dates(frame[date_col])
     result = pd.DataFrame(index=dates)
-    for canonical, aliases in ENERGY_ALIASES.items():
+    for canonical, aliases in {**ENERGY_ALIASES, **CONTEXT_ALIASES}.items():
         source = _find_column(frame, aliases)
         if source is not None:
             result[canonical] = _numeric(frame[source]).to_numpy()
@@ -207,6 +208,8 @@ def _series_features(target: pd.Series, energy: pd.DataFrame, index: pd.Datetime
         log_values = np.log(values.where(values > 0))
         for period in (1, 3, 12):
             frame[f"{column}_var_{period}"] = log_values.diff(period)
+    if "Coal" in energy:
+        frame["Coal"] = energy["Coal"].reindex(index).astype(float)
 
     log_target = np.log(target.where(target > 0))
     for lag in (1, 3, 12):
@@ -231,12 +234,15 @@ def _series_features(target: pd.Series, energy: pd.DataFrame, index: pd.Datetime
     month = index.month
     frame["mois_sin"] = np.sin(2.0 * np.pi * month / 12.0)
     frame["mois_cos"] = np.cos(2.0 * np.pi * month / 12.0)
-    frame["target_delta_3m"] = log_target.shift(-3) - log_target
     if "Brent" in energy:
         brent = np.log(energy["Brent"].reindex(index).where(energy["Brent"].reindex(index) > 0))
-        frame["baseline_brent_delta_3m"] = brent - brent.shift(3)
     else:
-        frame["baseline_brent_delta_3m"] = np.nan
+        brent = pd.Series(np.nan, index=index)
+    for horizon in (1, 3, 6, 12):
+        frame[f"target_delta_{horizon}m"] = log_target.shift(-horizon) - log_target
+        frame[f"baseline_brent_delta_{horizon}m"] = brent - brent.shift(horizon)
+    frame["target_delta_3m"] = frame["target_delta_3m"]
+    frame["baseline_brent_delta_3m"] = frame["baseline_brent_delta_3m"]
     frame.index.name = "date"
     return frame.replace([np.inf, -np.inf], np.nan)
 
@@ -279,5 +285,10 @@ def build_feature_table(energy_data: pd.DataFrame, imports_data: pd.DataFrame | 
 
 def feature_columns(table: pd.DataFrame) -> list[str]:
     """Liste les colonnes explicatives, en excluant date, cible et metadonnees."""
-    excluded = {"date", "code_sh", "target", "target_delta_3m", "baseline_brent_delta_3m"}
-    return [column for column in table.columns if column not in excluded]
+    excluded = {"date", "code_sh", "target", "Coal"}
+    return [
+        column for column in table.columns
+        if column not in excluded
+        and not column.startswith("target_delta_")
+        and not column.startswith("baseline_brent_delta_")
+    ]

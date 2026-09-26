@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -102,15 +103,17 @@ def _proxy_scenarios(forecast_prices: np.ndarray, crude_index: float,
     }
 
 
-def _validate_and_fit(group: pd.DataFrame, columns: list[str]
+def _validate_and_fit(group: pd.DataFrame, columns: list[str], horizon_mois: int
                       ) -> tuple[dict[str, Any], dict[str, float], Any, dict[str, Any]]:
-    labeled = group.loc[group["target_delta_3m"].notna()].sort_values("date").reset_index(drop=True)
+    target_label = f"target_delta_{horizon_mois}m"
+    brent_baseline = f"baseline_brent_delta_{horizon_mois}m"
+    labeled = group.loc[group[target_label].notna()].sort_values("date").reset_index(drop=True)
     if len(labeled) < 30:
         raise ValueError(f"30 observations etiquetees minimum sont requises; recu: {len(labeled)}.")
     x = labeled[columns].replace([np.inf, -np.inf], np.nan)
-    y = labeled["target_delta_3m"].to_numpy(dtype=float)
+    y = labeled[target_label].to_numpy(dtype=float)
     splits = min(5, max(2, len(labeled) // 30))
-    splitter = TimeSeriesSplit(n_splits=splits, gap=3)
+    splitter = TimeSeriesSplit(n_splits=splits, gap=horizon_mois)
     actuals: list[float] = []
     hgb_predictions: list[np.ndarray] = []
     ridge_predictions: list[float] = []
@@ -133,12 +136,12 @@ def _validate_and_fit(group: pd.DataFrame, columns: list[str]
         hgb_predictions.extend(fold_predictions)
         ridge_predictions.extend(ridge_fold_predictions)
         no_change.extend(np.zeros(len(validation_indices)))
-        brent_predictions.extend(labeled.iloc[validation_indices]["baseline_brent_delta_3m"].to_numpy())
+        brent_predictions.extend(labeled.iloc[validation_indices][brent_baseline].to_numpy())
         for row_index in validation_indices:
             origin = labeled.iloc[row_index]
             origins.append({
                 "origine": pd.Timestamp(origin["date"]).date().isoformat(),
-                "date_prevue": (pd.Timestamp(origin["date"]) + pd.DateOffset(months=3)).date().isoformat(),
+                "date_prevue": (pd.Timestamp(origin["date"]) + pd.DateOffset(months=horizon_mois)).date().isoformat(),
                 "prix_origine": float(origin["target"]),
             })
         last_validation = (x.iloc[validation_indices], y[validation_indices])
@@ -204,7 +207,12 @@ def _validate_and_fit(group: pd.DataFrame, columns: list[str]
     calibrated_count = 0
     rolling_window = 60
     for index, origin in enumerate(origins):
-        past_scores = oof_scores[max(0, index - rolling_window):index]
+        origin_date = pd.Timestamp(origin["origine"])
+        matured_indices = [
+            score_index for score_index in range(index)
+            if pd.Timestamp(origins[score_index]["date_prevue"]) <= origin_date
+        ][-rolling_window:]
+        past_scores = oof_scores[matured_indices]
         calibrated = len(past_scores) >= 20
         radius = _conformal_radius(past_scores) if calibrated else 0.0
         lower = float(base_low[index] - radius)
@@ -224,7 +232,8 @@ def _validate_and_fit(group: pd.DataFrame, columns: list[str]
     radius = _conformal_radius(oof_scores[-rolling_window:])
     selected_mae = float(mean_absolute_error(actual_array, central_array))
     metrics: dict[str, Any] = {
-        "validation": "TimeSeriesSplit walk-forward, gap=3 mois; calibration causale sur 60 residus precedents",
+        "horizon_mois": horizon_mois,
+        "validation": f"TimeSeriesSplit walk-forward, gap={horizon_mois} mois; calibration causale sur 60 residus arrives a echeance",
         "observations_validation": int(len(actual_array)),
         "modeles_candidats": candidate_metrics,
         "baselines": baseline_metrics,
@@ -278,7 +287,8 @@ def _validate_and_fit(group: pd.DataFrame, columns: list[str]
 
 def predict_from_features(table: pd.DataFrame, cible_utilisee: str,
                           part_donnees_proxy: float,
-                          sources_absentes: list[str] | None = None
+                          sources_absentes: list[str] | None = None,
+                          horizon_mois: int = 3,
                           ) -> list[PlasticsPredictionOutput]:
     """Entraine, valide et produit une prevision par code cible disponible."""
     columns = feature_columns(table)
@@ -287,7 +297,7 @@ def predict_from_features(table: pd.DataFrame, cible_utilisee: str,
     results: list[PlasticsPredictionOutput] = []
     for code, group in table.groupby("code_sh", dropna=False, sort=True):
         group = group.sort_values("date").reset_index(drop=True)
-        metrics, importances, model, calibration = _validate_and_fit(group, columns)
+        metrics, importances, model, calibration = _validate_and_fit(group, columns, horizon_mois)
         current = group.loc[group["target"].notna()].tail(1)
         if current.empty:
             continue
@@ -326,13 +336,14 @@ def predict_from_features(table: pd.DataFrame, cible_utilisee: str,
             "La disponibilite de publication intra-mois n'est pas prise en compte.",
         ]
         limits.extend(f"Source absente: {source}." for source in (sources_absentes or []))
-        if len(group.loc[group["target_delta_3m"].notna()]) < 60:
+        if len(group.loc[group[f"target_delta_{horizon_mois}m"].notna()]) < 60:
             limits.append("Historique court: moins de 60 observations etiquetees.")
         unit = "indice base 100 (2010)" if part_donnees_proxy else "TND/kg"
         results.append(PlasticsPredictionOutput(
             cible_utilisee=cible_utilisee,
             code_sh=str(code) if str(code) else None,
             date_reference=reference_date,
+            horizon_mois=horizon_mois,
             prix_actuel=price_now,
             prix_bas=float(prices[0]),
             prix_central=float(prices[1]),
@@ -353,7 +364,8 @@ def predict_from_features(table: pd.DataFrame, cible_utilisee: str,
 def run(pink_sheet: str | Path | None = None, imports: str | Path | None = None,
         customs: str | Path | None = None, usd_tnd: str | Path | None = None,
         inflation: str | Path | None = None,
-        raw_dir: str | Path = "data/raw", output_dir: str | Path = "data/processed"
+    raw_dir: str | Path = "data/raw", output_dir: str | Path = "data/processed",
+    horizons: tuple[int, ...] = (1, 3, 6, 12),
         ) -> list[PlasticsPredictionOutput]:
     """Execute l'ingenierie, la prevision et ecrit les contrats de sortie."""
     discovered = discover_sources(raw_dir)
@@ -377,10 +389,36 @@ def run(pink_sheet: str | Path | None = None, imports: str | Path | None = None,
     output_path.mkdir(parents=True, exist_ok=True)
     feature_table.to_csv(output_path / "features_plastiques.csv", index=False, encoding="utf-8")
     absent_sources = [name for name, path in paths.items() if path is None or not path.exists()]
-    predictions = predict_from_features(feature_table, target_name, proxy_share, absent_sources)
+    predictions = [
+        prediction
+        for horizon in horizons
+        for prediction in predict_from_features(
+            feature_table, target_name, proxy_share, absent_sources, horizon
+        )
+    ]
     payload = [prediction.model_dump(mode="json") for prediction in predictions]
     (output_path / "prediction_plastiques.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8"
+    )
+    history_path = output_path / "historique_previsions.csv"
+    history_rows = [{
+        "execution_utc": datetime.now(timezone.utc).isoformat(),
+        "date_reference": prediction.date_reference.isoformat(),
+        "horizon_mois": prediction.horizon_mois,
+        "cible_utilisee": prediction.cible_utilisee,
+        "prix_actuel": prediction.prix_actuel,
+        "prix_bas": prediction.prix_bas,
+        "prix_central": prediction.prix_central,
+        "prix_haut": prediction.prix_haut,
+        "tendance": prediction.tendance,
+        "modele_retenu": prediction.metriques.get("modele_retenu", "inconnu"),
+        "couverture_calibree": prediction.metriques.get("modele", {}).get(
+            "couverture_calibree_walk_forward"
+        ),
+    } for prediction in predictions]
+    history = pd.DataFrame(history_rows)
+    history.to_csv(
+        history_path, mode="a", header=not history_path.exists(), index=False, encoding="utf-8"
     )
     importance_rows = [
         {"code_sh": prediction.code_sh or "proxy", "feature": feature, "importance": value}
@@ -390,6 +428,7 @@ def run(pink_sheet: str | Path | None = None, imports: str | Path | None = None,
         output_path / "importance_features_plastiques.csv", index=False, encoding="utf-8"
     )
     print("Colonnes utilisees:", ", ".join(feature_columns(feature_table)))
+    print("Horizons calcules:", ", ".join(f"{h} mois" for h in horizons))
     return predictions
 
 
