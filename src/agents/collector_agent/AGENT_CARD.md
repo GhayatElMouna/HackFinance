@@ -8,7 +8,7 @@ sorties en un seul `CollectorOutput` transmis a l aval du pipeline.
   (prix international, Brent, USD/TND, inflation)
 - `matieres_premieres/` : sous-agents par matiere reelle du guide
   hackathon (ble, petrole codes en profondeur ; plastiques, aluminium
-  en stub, extensible a mais/cuivre/fer-acier)
+  en stub, extensible a mais/cuivre) ; fer_acier implemente (World Bank)
 
 **Input** : liste des matieres premieres a collecter, fenetre temporelle
 

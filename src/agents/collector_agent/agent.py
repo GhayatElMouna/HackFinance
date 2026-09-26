@@ -1,33 +1,29 @@
 """
-Agent Collecteur (parent) : appelle les sous-agents Variables et
-Matieres Premieres, puis agrege leurs sorties.
+Agent Collecteur (parent) — focus fer/acier.
+Construit uniquement des dicts pour eviter les conflits Pydantic (hot-reload).
 """
 from src.schemas import CollectorOutput
-from src.agents.collector_agent.variables import (
-    prix_international_agent, brent_agent, usd_tnd_agent, inflation_agent,
-)
-from src.agents.collector_agent.matieres_premieres import (
-    ble_agent, petrole_agent, plastiques_agent, aluminium_agent,
-)
+from src.agents.collector_agent.matieres_premieres import fer_acier_agent
 
 
-def run(matieres: list[str]) -> CollectorOutput:
-    """Point d entree de l agent Collecteur parent."""
-    variables = [
-        prix_international_agent.run(),
-        brent_agent.run(),
-        usd_tnd_agent.run(),
-        inflation_agent.run(),
-    ]
+def run(matieres: list[str] | None = None) -> CollectorOutput:
+    """Point d entree de l agent Collecteur parent (fer/acier uniquement)."""
+    _ = matieres  # ignore ; demo centree fer/acier
+    raw = fer_acier_agent.run()
+    payload = raw.model_dump() if hasattr(raw, "model_dump") else dict(raw)
+    # Re-serialisation JSON pour couper toute identite de classe Pydantic
+    import json
+    from datetime import date, datetime
 
-    matieres_map = {
-        "ble": ble_agent.run,
-        "petrole": petrole_agent.run,
-        "plastiques": plastiques_agent.run,
-        "aluminium": aluminium_agent.run,
-    }
-    matieres_premieres = [
-        matieres_map[m]() for m in matieres if m in matieres_map
-    ]
+    def _default(o):
+        if isinstance(o, (date, datetime)):
+            return o.isoformat()
+        raise TypeError(type(o))
 
-    return CollectorOutput(variables=variables, matieres_premieres=matieres_premieres)
+    clean = json.loads(json.dumps(payload, default=_default))
+    return CollectorOutput.model_validate(
+        {
+            "variables": [],
+            "matieres_premieres": [clean],
+        }
+    )
