@@ -7,7 +7,7 @@ from src.agents.collector_agent.variables import (
     prix_international_agent, brent_agent, usd_tnd_agent, inflation_agent,
 )
 from src.agents.collector_agent.matieres_premieres import (
-    ble_agent, petrole_agent, plastiques_agent, aluminium_agent,
+    ble_agent, petrole_agent, plastiques_agent, aluminium_agent, cuivre_agent,
 )
 
 
@@ -25,9 +25,11 @@ def run(matieres: list[str]) -> CollectorOutput:
         "petrole": petrole_agent.run,
         "plastiques": plastiques_agent.run,
         "aluminium": aluminium_agent.run,
+        "cuivre": cuivre_agent.run,
     }
     matieres_premieres = [
         matieres_map[m]() for m in matieres if m in matieres_map
     ]
 
     return CollectorOutput(variables=variables, matieres_premieres=matieres_premieres)
+
