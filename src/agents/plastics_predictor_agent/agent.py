@@ -268,7 +268,10 @@ def _validate_and_fit(group: pd.DataFrame, columns: list[str], horizon_mois: int
         "bat_toutes_les_baselines": bool(
             selected != "aucun_changement"
             and selected_mae < baseline_mae
-            and (not finite_brent.any() or selected_mae < float(baseline_metrics["variation_brent_3m"]["mae_variation"]))
+            and (
+                not finite_brent.any()
+                or selected_mae < float(baseline_metrics[brent_baseline_key]["mae_variation"])
+            )
         ),
         "comparaison_baselines": (
             "Aucun modele candidat ne bat la baseline aucun changement; baseline utilisee."

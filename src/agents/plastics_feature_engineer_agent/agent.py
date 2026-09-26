@@ -56,7 +56,10 @@ def discover_sources(raw_dir: str | Path) -> dict[str, Path | None]:
             None,
         )
 
-    imports = choose(r"comex|import(?:ation)?|ins[_-]?comex|commerce[_-]?exterieur")
+    imports = choose(
+        r"comex|import(?:ation)?s?|ins[_-]?comex|commerce[_-]?exterieur",
+        excluded=("importance", "feature", "historique", "prediction"),
+    )
     customs = choose(r"douane|tarif|custom")
     fx = choose(r"usdtnd|tauxchange|change")
     inflation = choose(r"inflation|ipc|cpi")
