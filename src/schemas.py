@@ -3,7 +3,7 @@ Contrat de donnees partage entre tous les agents.
 Toute personne modifiant une structure ici doit prevenir l equipe
 (referent : Explicateur/orchestration).
 """
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import date
 
@@ -23,11 +23,14 @@ class VariableOutput(BaseModel):
 
 class MarketDataPoint(BaseModel):
     date: date
-    prix_unitaire: float      # valeur / quantite
-    quantite: float
-    valeur_importee: float
     code_sh: str
+    prix_unitaire: Optional[float] = None
+    quantite: Optional[float] = None
+    valeur_importee: Optional[float] = None
     pays_origine: Optional[str] = None
+    prix_reference_usd_tonne: Optional[float] = None
+    brent_usd_baril: Optional[float] = None
+    uree_usd_tonne: Optional[float] = None
 
 
 class MatierePremiereOutput(BaseModel):
@@ -63,17 +66,37 @@ class WeatherNewsOutput(BaseModel):
 class FeatureRow(BaseModel):
     date: date
     matiere: str
-    moyenne_mobile_7j: float
-    volatilite_glissante: float
-    momentum: float
-    variation_fx: float
-    score_risque_meteo_news: float
+    prix_reference_usd_tonne: float
+    moyenne_mobile_3m: float
+    volatilite_3m: float
+    momentum_3m: float
+    variation_fx: Optional[float] = None
+    score_risque_meteo_news: Optional[float] = None
+    brent_usd_baril: Optional[float] = None
+    uree_usd_tonne: Optional[float] = None
 
 
 class PredictionOutput(BaseModel):
     matiere: str
     tendance: str               # "hausse" | "baisse" | "stable_volatile"
     confiance: float            # 0 a 1
+    prix_prevu: Optional[float] = None
+    unite: Optional[str] = None
+    horizon_mois: int = 1
+    date_cible: Optional[date] = None
+    precision_historique: Optional[float] = None
+    observations_selection: int = 0
+    mape_validation_pct: Optional[float] = None
+    mape_baseline_validation_pct: Optional[float] = None
+    observations_validation: int = 0
+    source: Optional[str] = None
+    prix_bas: Optional[float] = None
+    prix_haut: Optional[float] = None
+    prix_prophet: Optional[float] = None
+    modele: str = "Prophet"
+    comparaison_modeles: dict[str, dict[str, float]] = Field(default_factory=dict)
+    sensibilites_facteurs: dict[str, float] = Field(default_factory=dict)
+    sensibilites_observations: dict[str, int] = Field(default_factory=dict)
 
 
 class FeaturePredictorOutput(BaseModel):
