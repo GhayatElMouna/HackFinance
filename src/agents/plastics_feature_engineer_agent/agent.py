@@ -201,6 +201,7 @@ def _series_features(target: pd.Series, energy: pd.DataFrame, index: pd.Datetime
         if column not in energy:
             continue
         values = energy[column].reindex(index).astype(float)
+        frame[column] = values
         for lag in (1, 2, 3, 6):
             frame[f"{column}_lag_{lag}"] = values.shift(lag)
         log_values = np.log(values.where(values > 0))
@@ -233,7 +234,7 @@ def _series_features(target: pd.Series, energy: pd.DataFrame, index: pd.Datetime
     frame["target_delta_3m"] = log_target.shift(-3) - log_target
     if "Brent" in energy:
         brent = np.log(energy["Brent"].reindex(index).where(energy["Brent"].reindex(index) > 0))
-        frame["baseline_brent_delta_3m"] = brent.shift(-3) - brent
+        frame["baseline_brent_delta_3m"] = brent - brent.shift(3)
     else:
         frame["baseline_brent_delta_3m"] = np.nan
     frame.index.name = "date"

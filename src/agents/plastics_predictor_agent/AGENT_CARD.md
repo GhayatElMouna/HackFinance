@@ -1,9 +1,10 @@
 # Agent Predicteur Plastiques
 
-**Role** : prevoit la log-variation a trois mois et une fourchette de prix
-10-90 %, avec trois `HistGradientBoostingRegressor` a perte quantile. Corrige
-l'ordre des quantiles, compare les variations aux baselines sans changement et
-Brent, calcule les importances par permutation et genere trois scenarios.
+**Role** : prevoit la log-variation a trois mois en comparant les modeles
+`HistGradientBoostingRegressor` quantiles et Ridge en validation walk-forward.
+Si aucun candidat ne bat la baseline « aucun changement », le central reste le
+prix actuel. L'intervalle est calibre a 80 % par conformalisation des residus
+walk-forward precedents, avec fenetre glissante de 60 observations.
 
 **Entrees** : table `features_plastiques.csv` produite par l'agent Feature
 Engineer Plastiques; les entrees source sont des fichiers locaux CSV/XLSX.
@@ -13,10 +14,11 @@ Engineer Plastiques; les entrees source sont des fichiers locaux CSV/XLSX.
 affiche par `python -m src.agents.plastics_predictor_agent.agent`.
 
 **Methode** : validation walk-forward `TimeSeriesSplit` avec `gap=3`, MAE,
-direction, couverture 10-90 %, et entrainement final sur toutes les observations
-etiquetees. Une sortie est produite par code SH observe, ou une sortie proxy.
+direction, couverture brute et calibree. Le benchmark Brent utilise uniquement
+son rendement des trois mois precedents. Les scenarios du proxy appliquent les
+chocs directement aux composantes normalisees de l'indice.
 
-**Limites** : le proxy n'est pas un prix de transaction; la couverture cible
-theorique est proche de 80 % mais n'est pas garantie. Le resultat inclut la cible,
-les sources absentes, la derniere date exploitable et le statut de comparaison
-aux baselines. Le modele ne fournit pas d'explication causale.
+**Limites** : le proxy n'est pas un prix de transaction; la calibration conforme
+est empirique et sa couverture future n'est pas garantie. Le resultat inclut la
+cible, les sources absentes, la derniere date exploitable et la selection du
+modele. Le modele ne fournit pas d'explication causale.

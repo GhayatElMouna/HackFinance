@@ -13,6 +13,9 @@ from src.agents.plastics_feature_engineer_agent.agent import (
 from src.agents.plastics_predictor_agent.agent import (
     _model,
     _ordered_predictions,
+    _proxy_scenarios,
+    _select_model,
+    _trend_from_prices,
     predict_from_features,
     run,
 )
@@ -45,6 +48,42 @@ def test_features_at_date_do_not_depend_on_future_rows() -> None:
     after = revised.loc[revised["date"] == cutoff, columns].to_numpy(dtype=float)
     np.testing.assert_allclose(before, after, equal_nan=True)
     assert "target_delta_3m" not in columns
+
+
+def test_brent_baseline_uses_only_the_previous_three_months() -> None:
+    energy = _energy_data()
+    table, _, _ = build_feature_table(energy)
+    reference = pd.Timestamp("2015-06-01")
+    current = energy.loc[energy["Date"] == reference, "Brent"].iloc[0]
+    previous = energy.loc[energy["Date"] == reference - pd.DateOffset(months=3), "Brent"].iloc[0]
+    stored = table.loc[table["date"] == reference, "baseline_brent_delta_3m"].iloc[0]
+    assert np.isclose(stored, np.log(current) - np.log(previous))
+
+
+def test_scenarios_follow_proxy_formula_and_brent_order() -> None:
+    scenarios = _proxy_scenarios(np.array([115.0, 120.0, 125.0]), 100.0, 100.0)
+    up = scenarios["brent_hausse_10pct"]["prix_central"]
+    center = 120.0
+    down = scenarios["brent_baisse_10pct"]["prix_central"]
+    assert np.isclose(up, center + 7.0)
+    assert np.isclose(down, center - 7.0)
+    assert up > center > down
+    assert np.isclose(scenarios["gaz_europe_hausse_20pct"]["prix_central"], center + 6.0)
+
+
+def test_trend_uses_forecast_price_vs_current_and_half_std_threshold() -> None:
+    assert _trend_from_prices(100.0, 110.0, 0.10) == "hausse"
+    assert _trend_from_prices(100.0, 90.0, 0.10) == "baisse"
+    assert _trend_from_prices(100.0, 102.0, 0.10) == "stable"
+
+
+def test_model_selection_falls_back_when_candidates_do_not_beat_no_change() -> None:
+    candidates = {
+        "hist_gradient_boosting": {"mae_variation": 0.12},
+        "ridge": {"mae_variation": 0.11},
+    }
+    assert _select_model(candidates, 0.10) == "aucun_changement"
+    assert _select_model(candidates, 0.115) == "ridge"
 
 
 def test_imports_switch_target_and_keep_code_series() -> None:

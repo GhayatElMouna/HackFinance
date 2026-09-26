@@ -6,6 +6,7 @@ xgboost
 shap
 scikit-learn
 streamlit
+plotly>=5.20
 requests
 python-dotenv
 pydantic>=2.0

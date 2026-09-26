@@ -11,8 +11,12 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.inspection import permutation_importance
+from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import TimeSeriesSplit
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import Ridge
 
 from src.agents.plastics_feature_engineer_agent.agent import (
     build_feature_table,
@@ -45,8 +49,61 @@ def _safe_float(value: float) -> float:
     return float(value) if np.isfinite(value) else float("nan")
 
 
+def _ridge_model() -> Any:
+    return make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), Ridge(alpha=10.0))
+
+
+def _conformal_radius(scores: np.ndarray) -> float:
+    """Quantile conforme fini-echantillon au niveau 80 %."""
+    finite = np.asarray(scores, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if not len(finite):
+        return 0.0
+    rank = min(int(np.ceil((len(finite) + 1) * 0.8)), len(finite))
+    return float(np.partition(finite, rank - 1)[rank - 1])
+
+
+def _select_model(candidate_metrics: dict[str, dict[str, float]], baseline_mae: float) -> str:
+    """Ne retient un candidat que s'il bat le maintien du prix actuel."""
+    beating = {name: values["mae_variation"] for name, values in candidate_metrics.items()
+               if values["mae_variation"] < baseline_mae}
+    return min(beating, key=beating.get) if beating else "aucun_changement"
+
+
+def _trend_from_prices(current_price: float, central_price: float,
+                       historical_std: float) -> str:
+    change = np.log(central_price / current_price)
+    threshold = 0.5 * historical_std
+    if change > threshold:
+        return "hausse"
+    if change < -threshold:
+        return "baisse"
+    return "stable"
+
+
+def _proxy_scenarios(forecast_prices: np.ndarray, crude_index: float,
+                     gas_index: float) -> dict[str, dict[str, float]]:
+    """Applique les chocs aux composantes normalisees du proxy, pas au modele."""
+    low, central, high = np.sort(np.asarray(forecast_prices, dtype=float))
+    crude_impact = 0.70 * crude_index * 0.10
+    gas_impact = 0.30 * gas_index * 0.20
+    shocks = {
+        "brent_hausse_10pct": crude_impact,
+        "brent_baisse_10pct": -crude_impact,
+        "gaz_europe_hausse_20pct": gas_impact,
+    }
+    return {
+        name: {
+            "prix_bas": float(low + impact),
+            "prix_central": float(central + impact),
+            "prix_haut": float(high + impact),
+        }
+        for name, impact in shocks.items()
+    }
+
+
 def _validate_and_fit(group: pd.DataFrame, columns: list[str]
-                      ) -> tuple[dict[str, Any], dict[str, float], list[HistGradientBoostingRegressor], np.ndarray]:
+                      ) -> tuple[dict[str, Any], dict[str, float], Any, dict[str, Any]]:
     labeled = group.loc[group["target_delta_3m"].notna()].sort_values("date").reset_index(drop=True)
     if len(labeled) < 30:
         raise ValueError(f"30 observations etiquetees minimum sont requises; recu: {len(labeled)}.")
@@ -55,13 +112,13 @@ def _validate_and_fit(group: pd.DataFrame, columns: list[str]
     splits = min(5, max(2, len(labeled) // 30))
     splitter = TimeSeriesSplit(n_splits=splits, gap=3)
     actuals: list[float] = []
-    central_predictions: list[float] = []
-    lows: list[float] = []
-    highs: list[float] = []
+    hgb_predictions: list[np.ndarray] = []
+    ridge_predictions: list[float] = []
     no_change: list[float] = []
-    brent_actual: list[float] = []
-    final_models: list[HistGradientBoostingRegressor] = []
-    importance_model: HistGradientBoostingRegressor | None = None
+    brent_predictions: list[float] = []
+    origins: list[dict[str, Any]] = []
+    last_hgb_models: list[HistGradientBoostingRegressor] = []
+    last_ridge_model: Any = None
     last_validation: tuple[pd.DataFrame, np.ndarray] | None = None
 
     for train_indices, validation_indices in splitter.split(x):
@@ -69,66 +126,136 @@ def _validate_and_fit(group: pd.DataFrame, columns: list[str]
         for model in fold_models:
             model.fit(x.iloc[train_indices], y[train_indices])
         fold_predictions = _ordered_predictions(fold_models, x.iloc[validation_indices])
+        ridge = _ridge_model()
+        ridge.fit(x.iloc[train_indices], y[train_indices])
+        ridge_fold_predictions = ridge.predict(x.iloc[validation_indices])
         actuals.extend(y[validation_indices])
-        lows.extend(fold_predictions[:, 0])
-        central_predictions.extend(fold_predictions[:, 1])
-        highs.extend(fold_predictions[:, 2])
+        hgb_predictions.extend(fold_predictions)
+        ridge_predictions.extend(ridge_fold_predictions)
         no_change.extend(np.zeros(len(validation_indices)))
-        brent_actual.extend(labeled.iloc[validation_indices]["baseline_brent_delta_3m"].to_numpy())
+        brent_predictions.extend(labeled.iloc[validation_indices]["baseline_brent_delta_3m"].to_numpy())
+        for row_index in validation_indices:
+            origin = labeled.iloc[row_index]
+            origins.append({
+                "origine": pd.Timestamp(origin["date"]).date().isoformat(),
+                "date_prevue": (pd.Timestamp(origin["date"]) + pd.DateOffset(months=3)).date().isoformat(),
+                "prix_origine": float(origin["target"]),
+            })
         last_validation = (x.iloc[validation_indices], y[validation_indices])
-        final_models = fold_models
-        importance_model = fold_models[1]
+        last_hgb_models = fold_models
+        last_ridge_model = ridge
 
     actual_array = np.asarray(actuals)
-    central_array = np.asarray(central_predictions)
-    low_array = np.asarray(lows)
-    high_array = np.asarray(highs)
+    hgb_array = np.asarray(hgb_predictions)
+    ridge_array = np.asarray(ridge_predictions)
     no_change_array = np.asarray(no_change)
-    brent_array = np.asarray(brent_actual)
+    brent_array = np.asarray(brent_predictions)
     finite_brent = np.isfinite(brent_array)
+    baseline_mae = float(mean_absolute_error(actual_array, no_change_array))
+    candidate_metrics = {
+        "hist_gradient_boosting": {
+            "mae_variation": float(mean_absolute_error(actual_array, hgb_array[:, 1])),
+            "bonnes_directions": _direction_accuracy(actual_array, hgb_array[:, 1]),
+        },
+        "ridge": {
+            "mae_variation": float(mean_absolute_error(actual_array, ridge_array)),
+            "bonnes_directions": _direction_accuracy(actual_array, ridge_array),
+        },
+    }
     baseline_metrics: dict[str, dict[str, float | None]] = {
         "aucun_changement": {
-            "mae_variation": float(mean_absolute_error(actual_array, no_change_array)),
+            "mae_variation": baseline_mae,
             "bonnes_directions": _direction_accuracy(actual_array, no_change_array),
         }
     }
     if finite_brent.any():
-        model_mae_brent_period = float(mean_absolute_error(
-            actual_array[finite_brent], central_array[finite_brent]
-        ))
         baseline_metrics["variation_brent_3m"] = {
             "mae_variation": float(mean_absolute_error(actual_array[finite_brent], brent_array[finite_brent])),
-            "mae_modele_meme_periode": model_mae_brent_period,
             "bonnes_directions": _direction_accuracy(actual_array[finite_brent], brent_array[finite_brent]),
         }
-    model_mae = float(mean_absolute_error(actual_array, central_array))
-    comparisons = [model_mae < float(baseline_metrics["aucun_changement"]["mae_variation"])]
-    if finite_brent.any():
-        comparisons.append(model_mae_brent_period < float(
-            baseline_metrics["variation_brent_3m"]["mae_variation"]
-        ))
-    beat_baselines = bool(comparisons and all(comparisons))
-    metrics: dict[str, Any] = {
-        "validation": "TimeSeriesSplit walk-forward, gap=3 mois",
-        "observations_validation": int(len(actual_array)),
-        "modele": {
-            "mae_variation": model_mae,
-            "bonnes_directions": _direction_accuracy(actual_array, central_array),
-            "couverture_intervalle_10_90": float(np.mean(
-                (actual_array >= low_array) & (actual_array <= high_array))),
-        },
-        "baselines": baseline_metrics,
-        "bat_toutes_les_baselines": beat_baselines,
-        "comparaison_baselines": (
-            "Le modele bat les deux baselines." if beat_baselines
-            else "Le modele ne bat pas toutes les baselines sur la MAE walk-forward."
-        ),
-    }
+    selected = _select_model(candidate_metrics, baseline_mae)
+    if selected == "hist_gradient_boosting":
+        central_array, base_low, base_high = hgb_array[:, 1], hgb_array[:, 0], hgb_array[:, 2]
+        oof_scores = np.maximum(0.0, np.maximum(base_low - actual_array, actual_array - base_high))
+        final_models: Any = [_model(q) for q in QUANTILES]
+        importance_model = last_hgb_models[1]
+    elif selected == "ridge":
+        central_array = ridge_array
+        base_low = base_high = ridge_array
+        oof_scores = np.abs(actual_array - ridge_array)
+        final_models = _ridge_model()
+        importance_model = last_ridge_model
+    else:
+        central_array = no_change_array
+        base_low = base_high = no_change_array
+        oof_scores = np.abs(actual_array - no_change_array)
+        final_models = None
+        importance_model = None
 
-    train = labeled
-    final_models = [_model(q) for q in QUANTILES]
-    for model in final_models:
-        model.fit(train[columns].replace([np.inf, -np.inf], np.nan), train["target_delta_3m"].to_numpy())
+    train_x = labeled[columns].replace([np.inf, -np.inf], np.nan)
+    if selected == "hist_gradient_boosting":
+        for model in final_models:
+            model.fit(train_x, y)
+    elif selected == "ridge":
+        final_models.fit(train_x, y)
+
+    backtest: list[dict[str, Any]] = []
+    calibrated_hits: list[bool] = []
+    calibrated_count = 0
+    rolling_window = 60
+    for index, origin in enumerate(origins):
+        past_scores = oof_scores[max(0, index - rolling_window):index]
+        calibrated = len(past_scores) >= 20
+        radius = _conformal_radius(past_scores) if calibrated else 0.0
+        lower = float(base_low[index] - radius)
+        upper = float(base_high[index] + radius)
+        if calibrated:
+            calibrated_hits.append(bool(lower <= actual_array[index] <= upper))
+            calibrated_count += 1
+        backtest.append({
+            **origin,
+            "reel": float(origin["prix_origine"] * np.exp(actual_array[index])),
+            "prevu": float(origin["prix_origine"] * np.exp(central_array[index])),
+            "bas": float(origin["prix_origine"] * np.exp(lower)),
+            "haut": float(origin["prix_origine"] * np.exp(upper)),
+            "couverture_evaluee": calibrated,
+        })
+
+    radius = _conformal_radius(oof_scores[-rolling_window:])
+    selected_mae = float(mean_absolute_error(actual_array, central_array))
+    metrics: dict[str, Any] = {
+        "validation": "TimeSeriesSplit walk-forward, gap=3 mois; calibration causale sur 60 residus precedents",
+        "observations_validation": int(len(actual_array)),
+        "modeles_candidats": candidate_metrics,
+        "baselines": baseline_metrics,
+        "modele_retenu": selected,
+        "selection": ("Aucun candidat ne bat la baseline aucun changement; central de prevision = prix actuel."
+                      if selected == "aucun_changement" else
+                      f"{selected} retenu car sa MAE walk-forward bat aucun changement."),
+        "modele": {
+            "mae_variation": selected_mae,
+            "bonnes_directions": _direction_accuracy(actual_array, central_array),
+            "couverture_intervalle_10_90": (
+                float(np.mean((actual_array >= base_low) & (actual_array <= base_high)))
+                if selected == "hist_gradient_boosting" else None
+            ),
+            "couverture_calibree_walk_forward": float(np.mean(calibrated_hits)) if calibrated_hits else None,
+            "points_calibration_evalues": calibrated_count,
+            "niveau_calibration": 0.80,
+            "rayon_conforme_log": radius,
+        },
+        "bat_toutes_les_baselines": bool(
+            selected != "aucun_changement"
+            and selected_mae < baseline_mae
+            and (not finite_brent.any() or selected_mae < float(baseline_metrics["variation_brent_3m"]["mae_variation"]))
+        ),
+        "comparaison_baselines": (
+            "Aucun modele candidat ne bat la baseline aucun changement; baseline utilisee."
+            if selected == "aucun_changement"
+            else "Le modele retenu bat aucun changement; les metriques Brent sont fournies separement."
+        ),
+        "backtest": backtest,
+    }
 
     importances: dict[str, float] = {}
     if last_validation is not None and importance_model is not None:
@@ -142,25 +269,11 @@ def _validate_and_fit(group: pd.DataFrame, columns: list[str]
             for column, score in sorted(zip(columns, result.importances_mean),
                                         key=lambda item: item[1], reverse=True)
         }
-    threshold = 0.5 * float(np.std(y, ddof=1))
-    return metrics, importances, final_models, np.array([threshold, _safe_float(model_mae)])
-
-
-def _scenario_features(current: pd.DataFrame, scenario: str) -> pd.DataFrame:
-    adjusted = current.copy()
-    if scenario.startswith("brent"):
-        variable = "Brent"
-        shock = 0.10 if "hausse" in scenario else -0.10
-    elif scenario.startswith("gaz_europe"):
-        variable, shock = "Gas_Europe", 0.20
-    else:
-        return adjusted
-    for column in adjusted.columns:
-        if column.startswith(f"{variable}_lag_"):
-            adjusted[column] = adjusted[column] * (1.0 + shock)
-        elif column.startswith(f"{variable}_var_"):
-            adjusted[column] = adjusted[column] + np.log1p(shock)
-    return adjusted
+    return metrics, importances, final_models, {
+        "radius": radius,
+        "historical_std": float(np.std(y, ddof=1)),
+        "selected": selected,
+    }
 
 
 def predict_from_features(table: pd.DataFrame, cible_utilisee: str,
@@ -174,29 +287,38 @@ def predict_from_features(table: pd.DataFrame, cible_utilisee: str,
     results: list[PlasticsPredictionOutput] = []
     for code, group in table.groupby("code_sh", dropna=False, sort=True):
         group = group.sort_values("date").reset_index(drop=True)
-        metrics, importances, models, stats = _validate_and_fit(group, columns)
+        metrics, importances, model, calibration = _validate_and_fit(group, columns)
         current = group.loc[group["target"].notna()].tail(1)
         if current.empty:
             continue
         current_features = current[columns].replace([np.inf, -np.inf], np.nan)
-        quantiles = _ordered_predictions(models, current_features)[0]
         price_now = float(current["target"].iloc[0])
-        prices = price_now * np.exp(quantiles)
-        prices.sort()
-        central_change = float(quantiles[1])
-        threshold = float(stats[0])
-        trend = "hausse" if central_change > threshold else (
-            "baisse" if central_change < -threshold else "stable")
+        if calibration["selected"] == "hist_gradient_boosting":
+            changes = _ordered_predictions(model, current_features)[0]
+            changes[0] -= calibration["radius"]
+            changes[2] += calibration["radius"]
+        elif calibration["selected"] == "ridge":
+            central_change = float(model.predict(current_features)[0])
+            changes = np.array([
+                central_change - calibration["radius"],
+                central_change,
+                central_change + calibration["radius"],
+            ])
+        else:
+            changes = np.array([-calibration["radius"], 0.0, calibration["radius"]])
+        prices = np.sort(price_now * np.exp(changes))
+        trend = _trend_from_prices(
+            price_now, float(prices[1]), calibration["historical_std"]
+        )
         scenarios: dict[str, dict[str, float]] = {}
-        for name in ("brent_hausse_10pct", "brent_baisse_10pct", "gaz_europe_hausse_20pct"):
-            scenario_x = _scenario_features(current_features, name)
-            scenario_prices = price_now * np.exp(_ordered_predictions(models, scenario_x)[0])
-            scenario_prices.sort()
-            scenarios[name] = {
-                "prix_bas": float(scenario_prices[0]),
-                "prix_central": float(scenario_prices[1]),
-                "prix_haut": float(scenario_prices[2]),
-            }
+        if part_donnees_proxy:
+            years = pd.to_datetime(group["date"]).dt.year
+            crude_base = group.loc[years == 2010, "Crude_average"].mean()
+            gas_base = group.loc[years == 2010, "Gas_Europe"].mean()
+            if crude_base > 0 and gas_base > 0:
+                crude_index = float(current["Crude_average"].iloc[0] / crude_base * 100.0)
+                gas_index = float(current["Gas_Europe"].iloc[0] / gas_base * 100.0)
+                scenarios = _proxy_scenarios(prices, crude_index, gas_index)
         reference_date = pd.Timestamp(current["date"].iloc[0]).date()
         limits = [
             f"Type de cible: {'proxy' if part_donnees_proxy else 'reelle'} ({cible_utilisee}).",
