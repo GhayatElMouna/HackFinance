@@ -56,14 +56,14 @@ def discover_sources(raw_dir: str | Path) -> dict[str, Path | None]:
             None,
         )
 
-    imports = choose(r"comex|import|ins")
+    imports = choose(r"comex|import(?:ation)?|ins[_-]?comex|commerce[_-]?exterieur")
     customs = choose(r"douane|tarif|custom")
     fx = choose(r"usdtnd|tauxchange|change")
     inflation = choose(r"inflation|ipc|cpi")
     excluded = {path for path in (imports, customs, fx, inflation) if path is not None}
     pink = choose(
         r"pinksheet|worldbank|plast|dataset|matiere",
-        excluded=("comex", "import", "ins", "douane", "tarif", "custom",
+        excluded=("comex", "import", "douane", "tarif", "custom",
                   "usdtnd", "inflation", "ipc", "cpi"),
     )
     if pink is None:
