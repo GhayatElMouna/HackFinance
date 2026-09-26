@@ -89,6 +89,27 @@ class ExplainerOutput(BaseModel):
     feature_importances: dict   # {nom_feature: importance}
 
 
+class GasoilScenario(BaseModel):
+    nom: str
+    brent_usd_bbl: float
+    crack_spread_usd_bbl: float
+    prix_ulsd_usd_gal: float
+    variation_vs_dernier_pct: float
+    contribution_brent_usd_gal: float
+    contribution_spread_usd_gal: float
+    explication: str
+
+
+class GasoilForecastOutput(BaseModel):
+    matiere: str
+    date_derniere_observation: date
+    date_prevision: date
+    dernier_prix_ulsd_usd_gal: float
+    scenarios: List[GasoilScenario]
+    methode: str
+    avertissement: str
+
+
 class PipelineResult(BaseModel):
     collector: CollectorOutput
     weather_news: WeatherNewsOutput
