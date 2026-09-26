@@ -28,6 +28,7 @@ def run_pipeline(matieres: list[str], zone: str, horizon_mois: int = 1) -> Pipel
     feature_predictor_output = feature_predictor_agent.run(
         collector_output,
         weather_news_output,
+        horizon_mois=horizon_mois,
     )
     explanations = explainer_agent.run(feature_predictor_output)
 

@@ -247,6 +247,7 @@ def run(
     collector: CollectorOutput,
     weather_news: WeatherNewsOutput,
     *,
+    horizon_mois: int = 1,
     include_synthetic: bool = False,
 ) -> FeaturePredictorOutput:
     """Build rolling features and classify observed price direction.
@@ -268,7 +269,9 @@ def run(
             predictions.append(prediction)
         if not material.is_synthetic:
             try:
-                price_forecasts.append(forecast_monthly_price(material))
+                price_forecasts.append(
+                    forecast_monthly_price(material, horizon_months=horizon_mois)
+                )
             except ValueError:
                 pass
     return FeaturePredictorOutput(
