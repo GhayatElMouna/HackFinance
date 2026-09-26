@@ -55,17 +55,13 @@ python -m src.graph
 streamlit run run_dashboard.py
 ```
 
-- `python -m src.graph` : pipeline CLI (defaut : petrole)
-- `streamlit run run_dashboard.py` : dashboard demo jury
-  (statuts agents temps reel, graph d'orchestration, tendances,
-  feature importance avec poids budgetaire, panel Lois de Finances)
+Configurer `.env` (voir `.env.example`) :
 
-Pipeline programme :
+- `NEWS_API_KEY` — cle [NewsAPI](https://newsapi.org/) pour les actualites
+- `GEMINI_API_KEY` — cle Google AI Studio / Gemini (scoring news + enrichissement LF)
+- `LLM_MODEL` — defaut `gemini-2.5-flash` (`LLM_PROVIDER=gemini`)
 
-```python
-from src.graph import run_pipeline
-result = run_pipeline(["petrole"], "zones cerealieres nord Tunisie", horizon_mois=3)
-```
+Le dashboard propose un **rapport PDF** (plus d'export JSON).
 
 ## Contrat de donnees
 

@@ -33,15 +33,19 @@ class FakeCollector:
 
 
 class WeatherAgentTests(unittest.TestCase):
+    @patch.dict("os.environ", {"NEWS_API_KEY": ""}, clear=False)
     @patch("src.agents.weather_news_agent.agent.Collector", FakeCollector)
     def test_fetches_forecast_and_reports_weather_risk(self):
-        result = run("zones cerealieres nord Tunisie")
+        result = run("zones cerealieres nord Tunisie", matieres=["petrole"])
 
         self.assertEqual(result.zone, "Bizerte, Tunisie")
         self.assertEqual(result.score_risque, 0.6)
         self.assertEqual(len(result.events), 1)
         self.assertIn("Open-Meteo", result.source)
         self.assertFalse(result.is_synthetic)
+        self.assertTrue(
+            any("NEWS_API_KEY" in error for error in result.collection_errors)
+        )
 
 
 if __name__ == "__main__":

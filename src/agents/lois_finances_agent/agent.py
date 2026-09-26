@@ -7,9 +7,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-import requests
-from tenacity import retry, stop_after_attempt, wait_exponential
-
 from src.schemas import BudgetLine, FinanceLawOutput, FinanceLawYearSummary
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -110,14 +107,12 @@ def _keyword_hits(text: str, matiere: str) -> int:
     return sum(lower.count(keyword.lower()) for keyword in MATIERE_KEYWORDS.get(matiere, []))
 
 
-@retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=8))
 def _llm_summarize(chunks: list[str], year: int) -> str | None:
-    """Optional LLM enrichment via OpenAI-compatible Chat Completions API."""
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
-    if not api_key:
+    """Enrichissement optionnel via Gemini (ou OpenAI si configure)."""
+    from src.llm import chat, llm_configured
+
+    if not llm_configured():
         return None
-    base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
     sample = "\n\n".join(chunks[:4])
     prompt = (
         f"Tu analyses la Loi de Finances tunisienne {year}. "
@@ -126,28 +121,11 @@ def _llm_summarize(chunks: list[str], year: int) -> str | None:
         "Mentionne les montants si presents. Pas d'invention de chiffres absents du texte.\n\n"
         f"TEXTE:\n{sample}"
     )
-    response = requests.post(
-        f"{base_url}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "temperature": 0.1,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "Tu es un analyste budgetaire tunisien. Reponds en francais.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-        },
-        timeout=60,
+    return chat(
+        prompt,
+        system="Tu es un analyste budgetaire tunisien. Reponds en francais.",
+        temperature=0.1,
     )
-    response.raise_for_status()
-    content = response.json()["choices"][0]["message"]["content"]
-    return (content or "").strip() or None
 
 
 def _build_features(summaries: list[FinanceLawYearSummary]) -> dict[str, float]:

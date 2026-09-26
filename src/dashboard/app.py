@@ -1,21 +1,25 @@
 """
 Dashboard Streamlit — Boussole Budgetaire / TrendGov
-Visualisation du pipeline multi-agents LangGraph et des resultats.
+Resultats, indicateurs budgetaires et rapport PDF.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from dotenv import load_dotenv
 
-from src.graph import DEFAULT_STATUS, run_pipeline
+from src.dashboard.report_pdf import build_pdf_report
+from src.graph import run_pipeline
 from src.schemas import PipelineResult
 
+load_dotenv()
+
 ROOT = Path(__file__).resolve().parents[2]
+LOIS_DIR = ROOT / "data" / "lois_finances"
 
 st.set_page_config(
     page_title="Boussole Budgetaire",
@@ -24,7 +28,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --- Theme CSS ---
 st.markdown(
     """
 <style>
@@ -33,15 +36,8 @@ st.markdown(
 :root {
   --ink: #1a2332;
   --muted: #5c6b7a;
-  --surface: #f7f4ef;
-  --card: #ffffff;
   --accent: #0f6e56;
   --accent-soft: #d8f3e7;
-  --warn: #b45309;
-  --err: #b91c1c;
-  --idle: #94a3b8;
-  --run: #2563eb;
-  --done: #0f6e56;
 }
 
 html, body, [class*="css"] {
@@ -49,7 +45,7 @@ html, body, [class*="css"] {
   color: var(--ink);
 }
 
-.block-container { padding-top: 1.5rem; max-width: 1200px; }
+.block-container { padding-top: 1.5rem; max-width: 1100px; }
 
 h1, h2, h3 {
   font-family: 'Fraunces', Georgia, serif !important;
@@ -67,41 +63,6 @@ h1, h2, h3 {
 .hero h1 { color: #fff !important; margin: 0 0 0.35rem 0; font-size: 2rem; }
 .hero p { margin: 0; opacity: 0.88; font-size: 1.02rem; }
 
-.status-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 0.65rem;
-  margin: 0.8rem 0 1.2rem;
-}
-.status-pill {
-  background: var(--card);
-  border: 1px solid #e7e2d9;
-  border-radius: 12px;
-  padding: 0.7rem 0.8rem;
-  text-align: center;
-}
-.status-pill .name { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.25rem; }
-.status-pill .badge {
-  display: inline-block;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-}
-.badge-idle { background: #e2e8f0; color: #475569; }
-.badge-running { background: #dbeafe; color: #1d4ed8; }
-.badge-done { background: var(--accent-soft); color: var(--accent); }
-.badge-error { background: #fee2e2; color: var(--err); }
-
-.graph-box {
-  background: var(--card);
-  border: 1px solid #e7e2d9;
-  border-radius: 14px;
-  padding: 1rem 1.1rem;
-  margin-bottom: 1rem;
-}
 .metric-card {
   background: linear-gradient(180deg, #ffffff 0%, #f7f4ef 100%);
   border: 1px solid #e7e2d9;
@@ -113,131 +74,49 @@ h1, h2, h3 {
     unsafe_allow_html=True,
 )
 
-AGENT_LABELS = {
-    "collecteur": "Collecteur",
-    "variables": "Variables",
-    "matieres_premieres": "Matieres 1eres",
-    "lois_finances": "Lois de Finances",
-    "weather_news": "Meteo/News",
-    "feature_engineer": "Feature Eng.",
-    "predicteur": "Predicteur",
-    "explicateur": "Explicateur",
+FEATURE_LABELS = {
+    "depense_budget_mdt": "Depense budget (MDT)",
+    "variation_budget_pct": "Variation (%)",
+    "variation_budget_3ans_pct": "Variation 3 ans (%)",
+    "score_pression_budgetaire": "Pression budgetaire (0-1)",
+    "total_subventions_mdt_latest": "Total subventions (MDT)",
 }
 
-ORCH_NODES = [
-    "collecteur",
-    "variables",
-    "matieres_premieres",
-    "lois_finances",
-    "weather_news",
-    "feature_engineer",
-    "predicteur",
-    "explicateur",
-]
+
+def _label_feature(key: str) -> tuple[str, str]:
+    for prefix, label in FEATURE_LABELS.items():
+        if key == prefix or key.startswith(prefix + "_"):
+            matiere = key[len(prefix) :].lstrip("_") or "—"
+            return label, matiere.replace("_", " ")
+    return key.replace("_", " "), "—"
 
 
-def _badge_class(status: str) -> str:
-    return {
-        "idle": "badge-idle",
-        "running": "badge-running",
-        "done": "badge-done",
-        "error": "badge-error",
-    }.get(status, "badge-idle")
-
-
-def render_status(status: dict[str, str]) -> None:
-    cells = []
-    for key in ORCH_NODES:
-        value = status.get(key, "idle")
-        cells.append(
-            f'<div class="status-pill"><div class="name">{AGENT_LABELS[key]}</div>'
-            f'<span class="badge {_badge_class(value)}">{value}</span></div>'
-        )
-    st.markdown(f'<div class="status-grid">{"".join(cells)}</div>', unsafe_allow_html=True)
-
-
-def render_orchestration_graph(status: dict[str, str]) -> None:
-    color_map = {
-        "idle": "#94a3b8",
-        "running": "#2563eb",
-        "done": "#0f6e56",
-        "error": "#b91c1c",
-    }
-    nodes = [
-        ("Collecteur", 0.5, 1.0, "collecteur"),
-        ("Variables", 0.12, 0.72, "variables"),
-        ("Matieres", 0.38, 0.72, "matieres_premieres"),
-        ("Lois Finances", 0.62, 0.72, "lois_finances"),
-        ("Meteo/News", 0.88, 0.72, "weather_news"),
-        ("Feature Eng.", 0.5, 0.45, "feature_engineer"),
-        ("Predicteur", 0.5, 0.25, "predicteur"),
-        ("Explicateur", 0.5, 0.08, "explicateur"),
-    ]
-    edges = [
-        (0, 1), (0, 2), (0, 3), (0, 4),
-        (1, 5), (2, 5), (3, 5), (4, 5),
-        (5, 6), (6, 7),
-    ]
-    fig = go.Figure()
-    for i, j in edges:
-        fig.add_trace(
-            go.Scatter(
-                x=[nodes[i][1], nodes[j][1]],
-                y=[nodes[i][2], nodes[j][2]],
-                mode="lines",
-                line=dict(color="#cbd5e1", width=2),
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
-    fig.add_trace(
-        go.Scatter(
-            x=[n[1] for n in nodes],
-            y=[n[2] for n in nodes],
-            mode="markers+text",
-            text=[n[0] for n in nodes],
-            textposition="top center",
-            marker=dict(
-                size=28,
-                color=[color_map.get(status.get(n[3], "idle"), "#94a3b8") for n in nodes],
-                line=dict(width=2, color="white"),
-            ),
-            hovertext=[f"{n[0]}: {status.get(n[3], 'idle')}" for n in nodes],
-            hoverinfo="text",
-            showlegend=False,
-        )
-    )
-    fig.update_layout(
-        height=340,
-        margin=dict(l=10, r=10, t=30, b=10),
-        xaxis=dict(visible=False, range=[-0.05, 1.05]),
-        yaxis=dict(visible=False, range=[0, 1.15]),
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-    )
-    st.plotly_chart(fig, use_container_width=True)
+def features_budget_table(features: dict[str, float]) -> pd.DataFrame:
+    rows = []
+    for key, value in features.items():
+        label, matiere = _label_feature(key)
+        rows.append({"Indicateur": label, "Matiere": matiere, "Valeur": value})
+    return pd.DataFrame(rows)
 
 
 def render_results(result: PipelineResult) -> None:
     preds = result.feature_predictor.predictions
     if not preds:
         st.info("Aucune prediction disponible (historique insuffisant ou erreur de collecte).")
-        return
+    else:
+        cols = st.columns(min(3, len(preds)))
+        for index, prediction in enumerate(preds):
+            with cols[index % len(cols)]:
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric(
+                    prediction.matiere.capitalize(),
+                    prediction.tendance.replace("_", " ").title(),
+                    f"confiance {prediction.confiance * 100:.1f}%",
+                )
+                if prediction.budget_a_influence:
+                    st.caption("Facteur budgetaire: influence detectee")
+                st.markdown("</div>", unsafe_allow_html=True)
 
-    cols = st.columns(min(3, len(preds)))
-    for index, prediction in enumerate(preds):
-        with cols[index % len(cols)]:
-            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-            st.metric(
-                prediction.matiere.capitalize(),
-                prediction.tendance.replace("_", " ").title(),
-                f"confiance {prediction.confiance * 100:.1f}%",
-            )
-            if prediction.budget_a_influence:
-                st.caption("Facteur budgetaire: influence detectee")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-    # Feature importance charts
     st.subheader("Feature importance")
     for explanation in result.explanations:
         if not explanation.feature_importances:
@@ -248,9 +127,9 @@ def render_results(result: PipelineResult) -> None:
                 for key, value in explanation.feature_importances.items()
             ]
         )
-        # Highlight budget bar
         colors = [
-            "#0f6e56" if "budget" in row["Facteur"].lower() or "depense" in row["Facteur"].lower()
+            "#0f6e56"
+            if "budget" in row["Facteur"].lower() or "depense" in row["Facteur"].lower()
             else "#64748b"
             for _, row in frame.iterrows()
         ]
@@ -271,12 +150,15 @@ def render_results(result: PipelineResult) -> None:
             xaxis_title="Poids (%)",
             yaxis_title="",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key=f"importance_{explanation.matiere}",
+        )
         st.write(explanation.texte_explicatif)
         if explanation.budget_mentionne:
             st.success("Le facteur depenses budgetaires est explicitement pris en compte.")
 
-    # Lois de finances panel
     if result.lois_finances:
         st.subheader("Lois de Finances (2024–2026)")
         st.caption(
@@ -285,6 +167,7 @@ def render_results(result: PipelineResult) -> None:
         )
         for warning in result.lois_finances.warnings:
             st.warning(warning)
+
         rows = []
         for year_summary in result.lois_finances.resumes_par_annee:
             for line in year_summary.lignes:
@@ -309,13 +192,59 @@ def render_results(result: PipelineResult) -> None:
                 color_discrete_sequence=["#0f6e56", "#1d4ed8", "#b45309", "#64748b"],
             )
             fig.update_layout(height=360, margin=dict(l=10, r=10, t=50, b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="budget_bar_lois")
             st.dataframe(budget_df, use_container_width=True, hide_index=True)
 
-        if result.lois_finances.features_budgetaires:
-            st.json(result.lois_finances.features_budgetaires)
+        features = result.lois_finances.features_budgetaires or {}
+        if features:
+            st.markdown("##### Indicateurs budgetaires derives")
+            feat_df = features_budget_table(features)
+            st.dataframe(feat_df, use_container_width=True, hide_index=True)
+            chart_df = feat_df[
+                feat_df["Indicateur"].isin(
+                    [
+                        "Depense budget (MDT)",
+                        "Variation (%)",
+                        "Variation 3 ans (%)",
+                        "Pression budgetaire (0-1)",
+                        "Total subventions (MDT)",
+                    ]
+                )
+            ]
+            if not chart_df.empty:
+                fig_feat = px.bar(
+                    chart_df,
+                    x="Indicateur",
+                    y="Valeur",
+                    color="Matiere",
+                    barmode="group",
+                    title="Synthese des features budgetaires",
+                    color_discrete_sequence=["#0f6e56", "#1d4ed8", "#b45309"],
+                )
+                fig_feat.update_layout(height=320, margin=dict(l=10, r=10, t=50, b=10))
+                st.plotly_chart(fig_feat, use_container_width=True, key="features_budget_chart")
 
-    # Collector snapshot
+    st.subheader("Meteo & actualites")
+    st.caption(f"Source: {result.weather_news.source} · Zone: {result.weather_news.zone}")
+    st.metric("Score de risque agrege", f"{result.weather_news.score_risque:.2f}")
+    if result.weather_news.collection_errors:
+        for err in result.weather_news.collection_errors:
+            st.warning(err)
+    if result.weather_news.events:
+        news_df = pd.DataFrame(
+            [
+                {
+                    "Date": event.date.isoformat(),
+                    "Impact": event.score_impact,
+                    "Titre": event.titre,
+                }
+                for event in result.weather_news.events
+            ]
+        )
+        st.dataframe(news_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("Aucun evenement meteo/news pour cette execution.")
+
     with st.expander("Donnees collectees"):
         if result.collector.collection_errors:
             for err in result.collector.collection_errors:
@@ -352,8 +281,8 @@ st.markdown(
     """
 <div class="hero">
   <h1>Boussole Budgetaire</h1>
-  <p>Detection precoce de tendances de prix — pipeline multi-agents LangGraph
-  (Variables · Matieres premieres · Lois de Finances · Feature · Prediction · Explication).</p>
+  <p>Detection precoce de tendances de prix — pipeline multi-agents
+  (Variables · Matieres premieres · Lois de Finances · News · Prediction).</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -369,80 +298,51 @@ with st.sidebar:
     zone = st.text_input("Zone meteo", "zones cerealieres nord Tunisie")
     horizon = st.select_slider("Horizon (mois)", options=[1, 3, 6, 9, 12], value=3)
     st.markdown("---")
+    st.subheader("Lois de Finances")
+    st.caption("Deposez les PDF dans le dossier du projet :")
+    st.code("data/lois_finances/\n  lf_2024.pdf\n  lf_2025.pdf\n  lf_2026.pdf", language=None)
+    existing = sorted(p.name for p in LOIS_DIR.glob("lf_*.pdf")) if LOIS_DIR.exists() else []
+    if existing:
+        st.success("PDF detectes: " + ", ".join(existing))
+    else:
+        st.info("Aucun PDF detecte — extraits curated utilises.")
+    st.markdown("---")
+    st.subheader("NewsAPI / Gemini")
     st.caption(
-        "PDF Lois de Finances: placez `lf_2024.pdf`, `lf_2025.pdf`, `lf_2026.pdf` "
-        f"dans `{ROOT / 'data' / 'lois_finances'}`."
+        "Cles dans `.env` : `NEWS_API_KEY`, `GEMINI_API_KEY` "
+        "(scoring LLM des actualites + enrichissement Lois de Finances)."
     )
     run_clicked = st.button("Lancer le pipeline", type="primary", use_container_width=True)
 
-status_placeholder = st.empty()
-graph_placeholder = st.empty()
-result_placeholder = st.empty()
-
-if "pipeline_status" not in st.session_state:
-    st.session_state.pipeline_status = dict(DEFAULT_STATUS)
 if "pipeline_result" not in st.session_state:
     st.session_state.pipeline_result = None
-
-with status_placeholder.container():
-    st.subheader("Etat des agents")
-    render_status(st.session_state.pipeline_status)
-
-with graph_placeholder.container():
-    st.subheader("Graph d'orchestration")
-    st.markdown('<div class="graph-box">', unsafe_allow_html=True)
-    render_orchestration_graph(st.session_state.pipeline_status)
-    st.markdown("</div>", unsafe_allow_html=True)
 
 if run_clicked:
     if not matieres:
         st.error("Selectionnez au moins une matiere.")
     else:
-        live_status = dict(DEFAULT_STATUS)
-        status_box = st.status("Pipeline en cours…", expanded=True)
-
-        def on_status(updated: dict[str, str]) -> None:
-            live_status.update(updated)
-            st.session_state.pipeline_status = dict(live_status)
-            with status_placeholder.container():
-                st.subheader("Etat des agents")
-                render_status(live_status)
-            with graph_placeholder.container():
-                st.subheader("Graph d'orchestration")
-                render_orchestration_graph(live_status)
-            running = [k for k, v in live_status.items() if v == "running"]
-            status_box.write(
-                "Agents: "
-                + ", ".join(f"{AGENT_LABELS.get(k, k)}={v}" for k, v in live_status.items() if k in ORCH_NODES)
-            )
-            if running:
-                status_box.update(label=f"En cours: {', '.join(AGENT_LABELS.get(r, r) for r in running)}")
-
-        try:
-            result = run_pipeline(
-                matieres,
-                zone,
-                horizon_mois=horizon,
-                status_callback=on_status,
-            )
-            st.session_state.pipeline_result = result
-            st.session_state.pipeline_status = result.agent_status or live_status
-            status_box.update(label="Pipeline termine", state="complete")
-        except Exception as error:
-            status_box.update(label="Pipeline en erreur", state="error")
-            st.error(str(error))
+        with st.spinner("Pipeline en cours…"):
+            try:
+                result = run_pipeline(matieres, zone, horizon_mois=horizon)
+                st.session_state.pipeline_result = result
+                st.success("Pipeline termine.")
+            except Exception as error:
+                st.error(str(error))
 
 if st.session_state.pipeline_result is not None:
-    with result_placeholder.container():
-        st.subheader("Resultats")
-        render_results(st.session_state.pipeline_result)
+    st.subheader("Resultats")
+    render_results(st.session_state.pipeline_result)
 
-    # Export
-    with st.expander("Export JSON"):
-        payload = st.session_state.pipeline_result.model_dump(mode="json")
+    st.subheader("Rapport PDF")
+    try:
+        pdf_bytes = build_pdf_report(st.session_state.pipeline_result)
         st.download_button(
-            "Telecharger le resultat",
-            data=json.dumps(payload, ensure_ascii=False, indent=2),
-            file_name="boussole_result.json",
-            mime="application/json",
+            "Telecharger le rapport PDF",
+            data=pdf_bytes,
+            file_name="boussole_budgetaire_rapport.pdf",
+            mime="application/pdf",
+            type="primary",
+            use_container_width=True,
         )
+    except Exception as error:
+        st.error(f"Generation PDF impossible: {error}")

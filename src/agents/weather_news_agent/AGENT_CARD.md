@@ -1,19 +1,18 @@
 # Agent Meteo/News
 
-**Role** : recuperer directement une prevision Open-Meteo a 7 jours pour une
-zone tunisienne et deriver un score de risque meteorologique (0 a 1) utilise
-comme feature exogene par l'agent Feature Engineer + Predicteur.
+**Role** : combiner
+1. prevision Open-Meteo a 7 jours (risque meteo 0-1)
+2. actualites NewsAPI (`https://newsapi.org/`) filtrees sur les matieres
+3. scoring d'impact optionnel via LLM Gemini (`GEMINI_API_KEY`),
+   sinon heuristique mots-cles haussiers/baissiers
 
-**Input** : zone geographique, fenetre temporelle
+**Input** : `zone: str`, `matieres: list[str] | None`
 
-**Output** : `WeatherNewsOutput` (voir schemas.py)
+**Output** : `WeatherNewsOutput`
 
-**Source active** : Open-Meteo geocoding et forecast, sans cle API.
+**Variables d'environnement** :
+- `NEWS_API_KEY` (obligatoire pour les news)
+- `GEMINI_API_KEY` (optionnel, scoring LLM — defaut provider)
+- `LLM_MODEL` (defaut `gemini-2.5-flash`)
 
-**Limite** : le flux d'actualites n'est pas branche; les evenements et le score
-representent uniquement la meteo. Les erreurs de collecte sont remontees dans
-`WeatherNewsOutput.collection_errors`.
-
-**Dependances** : requests
-
-**Responsable** : [nom]
+**Responsable** : orchestration

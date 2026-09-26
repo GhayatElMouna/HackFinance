@@ -15,6 +15,7 @@ import operator
 from typing import Annotated, Any, Callable, Optional, TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from dotenv import load_dotenv
 
 from src.agents.collector_agent.matieres_orchestrator import agent as matieres_orchestrator
 from src.agents.collector_agent.variables_orchestrator import agent as variables_orchestrator
@@ -32,6 +33,8 @@ from src.schemas import (
     VariableOutput,
     WeatherNewsOutput,
 )
+
+load_dotenv()
 
 StatusCallback = Optional[Callable[[dict[str, str]], None]]
 
@@ -135,8 +138,12 @@ def node_lois_finances(state: PipelineState) -> dict[str, Any]:
 
 def node_weather(state: PipelineState) -> dict[str, Any]:
     zone = state.get("zone") or "zones cerealieres nord Tunisie"
+    matieres = state.get("matieres") or ["petrole"]
     try:
-        output = weather_news_agent.run(zone)
+        try:
+            output = weather_news_agent.run(zone, matieres=matieres)
+        except TypeError:
+            output = weather_news_agent.run(zone)
         return {
             "weather_news": output.model_dump(mode="json"),
             "agent_status": {"weather_news": "done"},
@@ -147,7 +154,7 @@ def node_weather(state: PipelineState) -> dict[str, Any]:
             score_risque=0.0,
             events=[],
             zone=zone,
-            source="meteo indisponible",
+            source="meteo/news indisponible",
             is_synthetic=True,
             collection_errors=[str(error)],
         )
