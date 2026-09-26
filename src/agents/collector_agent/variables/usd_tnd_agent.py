@@ -1,10 +1,6 @@
-from src.schemas import VariableOutput
+import yfinance as yf
 
-
-def run() -> VariableOutput:
-    """Sous-agent USD/TND (T17, priorite 1)."""
-    # TODO: appeler API BCT (GOSDMX)
-    return VariableOutput(
-        nom="usd_tnd", date="2026-09-01", valeur=0.0,
-        unite="TND", source="TODO", is_synthetic=True,
-    )
+df = yf.download("USDTND=X", start="2023-01-01")
+df = df[["Close"]].reset_index()
+df.columns = ["date", "usd_tnd"]
+df.to_csv("data/raw/usd_tnd.csv", index=False)
