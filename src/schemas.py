@@ -31,7 +31,7 @@ class MarketDataPoint(BaseModel):
 
 
 class MatierePremiereOutput(BaseModel):
-    matiere: str               # "ble", "petrole", "plastiques", "aluminium"
+    matiere: str               # "ble", "petrole", "plastiques", "aluminium", "fer_acier"
     points: List[MarketDataPoint]
     source: str
     is_synthetic: bool = False
@@ -70,10 +70,22 @@ class FeatureRow(BaseModel):
     score_risque_meteo_news: float
 
 
+class ForecastPoint(BaseModel):
+    date: date
+    yhat: float
+    yhat_lower: Optional[float] = None
+    yhat_upper: Optional[float] = None
+
+
 class PredictionOutput(BaseModel):
     matiere: str
     tendance: str               # "hausse" | "baisse" | "stable_volatile"
     confiance: float            # 0 a 1
+    modele: str = "stub"        # "sarimax" | "xgboost" | "stub"
+    variation_prevue_pct: float = 0.0
+    attributs: dict = {}        # indicateurs + exogenes (valeurs numeriques)
+    historique: List[ForecastPoint] = []
+    forecast: List[ForecastPoint] = []
 
 
 class FeaturePredictorOutput(BaseModel):

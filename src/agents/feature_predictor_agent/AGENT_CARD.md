@@ -4,13 +4,16 @@
 1. Feature engineering : fusionne les sorties du Collecteur (variables +
    matieres premieres) et du Meteo/News ; calcule moyennes mobiles,
    volatilite glissante, momentum, variation FX par matiere.
-2. Prediction : classifie la tendance (hausse / baisse / stable-volatile)
-   par matiere via XGBoost (baseline), avec indice de confiance.
+2. Prediction :
+   - `fer_acier` : forecast SARIMAX (saisonnalite mensuelle, Brent en
+     exogene) + classification tendance / confiance + series
+     historique/forecast pour le dashboard.
+   - autres matieres : stub (XGBoost prevu).
 
-**Input** : `CollectorOutput`, `WeatherNewsOutput`
+**Input** : `CollectorOutput`, `WeatherNewsOutput`, `horizon` (mois)
 
 **Output** : `FeaturePredictorOutput` (voir schemas.py)
 
-**Dependances** : pandas, numpy, xgboost, scikit-learn
+**Dependances** : pandas, numpy, statsmodels, xgboost, scikit-learn
 
 **Responsable** : [nom]
