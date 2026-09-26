@@ -14,8 +14,8 @@ choisie et liste des colonnes explicatives.
 
 **Methode** : dates ramenees au premier du mois; variations log des energies,
 retards, volatilite et ecart a la moyenne de la cible, variables saisonnieres et
-series optionnelles disponibles a date. Le label d'apprentissage est la
-log-variation a trois mois et n'est jamais inclus parmi les features.
+series optionnelles disponibles a date. Les labels d'apprentissage sont les
+log-variations a 1, 3, 6 et 12 mois, jamais incluses parmi les features.
 
 **Limites** : l'indice est un proxy amont, pas un prix observe de resine. La
 normalisation utilise la moyenne 2010; les features de cible sont exprimees en
