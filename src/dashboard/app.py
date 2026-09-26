@@ -509,34 +509,4 @@ def _render_plastics() -> None:
     _render_explanation(features, prediction, simulation)
 
 
-def _render_existing_dashboard() -> None:
-    from src.graph import run_pipeline
-
-    st.title("Boussole budgétaire")
-    st.info(
-        "Ce pipeline historique appelle successivement le collecteur, la météo et les actualités, le "
-        "prédicteur partagé et l’explicateur. Le collecteur exécute toujours ses quatre agents de "
-        "variables, puis les agents des matières sélectionnées. Dans l’état actuel du dépôt, les "
-        "fournisseurs Brent, prix international, USD/TND, inflation, blé et pétrole "
-        "sont des stubs à valeurs synthétiques (TODO/API non branchées) ; aluminium "
-        "et plastiques ne sont pas implémentés. L’agent météo/actualités renvoie un score "
-        "nul sans événement et l’explicateur renvoie « TODO ». Ce flux ne lit pas "
-        "la Pink Sheet locale ni le nouveau prédicteur autonome Plastiques."
-    )
-    materials = st.multiselect(
-        "Matières premières", ["ble", "petrole", "plastiques", "aluminium"],
-        default=["ble", "petrole"],
-    )
-    if st.button("Lancer le pipeline"):
-        result = run_pipeline(materials, "zones céréalières nord Tunisie")
-        st.subheader("Prévisions")
-        st.write(result.feature_predictor.predictions)
-        st.subheader("Explications")
-        st.write(result.explanations)
-
-
-page = st.sidebar.radio("Vue", ["Plastiques", "Pipeline multi-matières"], index=0)
-if page == "Plastiques":
-    _render_plastics()
-else:
-    _render_existing_dashboard()
+_render_plastics()
