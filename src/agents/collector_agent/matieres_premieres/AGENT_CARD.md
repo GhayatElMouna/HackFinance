@@ -10,9 +10,10 @@ reelle du guide hackathon. Meme patron : `run() -> MatierePremiereOutput`.
 | cuivre_agent | 74 | INS COMEX, World Bank/IMF, BCT | code en profondeur | GHAYA |
 | plastiques_agent | HS 39 | INS COMEX, World Bank/IMF energie, Min. Finances | stub | |
 | aluminium_agent | HS 76 | INS COMEX, World Bank/IMF, BCT | stub | |
+| fer_acier_agent | HS 72 | World Bank Pink Sheet (Iron ore CFR Chine, proxy acier) | implemente | |
 
 **Matieres prevues non codees pour la demo** (meme patron a dupliquer si
-le temps le permet) : Mais (HS 1005), Fer/Acier (HS 72).
+le temps le permet) : Mais (HS 1005).
 
 **Point de vigilance (guide hackathon)** : ne pas agreger des produits
 heterogenes sous un meme prix unitaire ; descendre au HS6 si besoin.
