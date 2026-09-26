@@ -154,6 +154,7 @@ def _validate_and_fit(group: pd.DataFrame, columns: list[str], horizon_mois: int
     no_change_array = np.asarray(no_change)
     brent_array = np.asarray(brent_predictions)
     finite_brent = np.isfinite(brent_array)
+    brent_effective_array = np.where(finite_brent, brent_array, no_change_array)
     baseline_mae = float(mean_absolute_error(actual_array, no_change_array))
     candidate_metrics = {
         "hist_gradient_boosting": {
@@ -171,12 +172,17 @@ def _validate_and_fit(group: pd.DataFrame, columns: list[str], horizon_mois: int
             "bonnes_directions": _direction_accuracy(actual_array, no_change_array),
         }
     }
+    brent_baseline_key = f"variation_brent_{horizon_mois}m"
     if finite_brent.any():
-        baseline_metrics["variation_brent_3m"] = {
-            "mae_variation": float(mean_absolute_error(actual_array[finite_brent], brent_array[finite_brent])),
-            "bonnes_directions": _direction_accuracy(actual_array[finite_brent], brent_array[finite_brent]),
+        baseline_metrics[brent_baseline_key] = {
+            "mae_variation": float(mean_absolute_error(actual_array, brent_effective_array)),
+            "bonnes_directions": _direction_accuracy(actual_array, brent_effective_array),
         }
     selected = _select_model(candidate_metrics, baseline_mae)
+    brent_baseline_mae = baseline_metrics.get(brent_baseline_key, {}).get("mae_variation")
+    if isinstance(brent_baseline_mae, (int, float)) and brent_baseline_mae < baseline_mae:
+        if selected == "aucun_changement" or brent_baseline_mae < candidate_metrics[selected]["mae_variation"]:
+            selected = brent_baseline_key
     if selected == "hist_gradient_boosting":
         central_array, base_low, base_high = hgb_array[:, 1], hgb_array[:, 0], hgb_array[:, 2]
         oof_scores = np.maximum(0.0, np.maximum(base_low - actual_array, actual_array - base_high))
@@ -188,6 +194,12 @@ def _validate_and_fit(group: pd.DataFrame, columns: list[str], horizon_mois: int
         oof_scores = np.abs(actual_array - ridge_array)
         final_models = _ridge_model()
         importance_model = last_ridge_model
+    elif selected == brent_baseline_key:
+        central_array = brent_effective_array
+        base_low = base_high = brent_effective_array
+        oof_scores = np.abs(actual_array - brent_effective_array)
+        final_models = None
+        importance_model = None
     else:
         central_array = no_change_array
         base_low = base_high = no_change_array
@@ -256,7 +268,10 @@ def _validate_and_fit(group: pd.DataFrame, columns: list[str], horizon_mois: int
         "bat_toutes_les_baselines": bool(
             selected != "aucun_changement"
             and selected_mae < baseline_mae
-            and (not finite_brent.any() or selected_mae < float(baseline_metrics["variation_brent_3m"]["mae_variation"]))
+            and (
+                not finite_brent.any()
+                or selected_mae < float(baseline_metrics[brent_baseline_key]["mae_variation"])
+            )
         ),
         "comparaison_baselines": (
             "Aucun modele candidat ne bat la baseline aucun changement; baseline utilisee."
@@ -309,6 +324,15 @@ def predict_from_features(table: pd.DataFrame, cible_utilisee: str,
             changes[2] += calibration["radius"]
         elif calibration["selected"] == "ridge":
             central_change = float(model.predict(current_features)[0])
+            changes = np.array([
+                central_change - calibration["radius"],
+                central_change,
+                central_change + calibration["radius"],
+            ])
+        elif calibration["selected"] == f"variation_brent_{horizon_mois}m":
+            central_change = float(current[f"baseline_brent_delta_{horizon_mois}m"].iloc[0])
+            if not np.isfinite(central_change):
+                central_change = 0.0
             changes = np.array([
                 central_change - calibration["radius"],
                 central_change,
@@ -411,7 +435,7 @@ def run(pink_sheet: str | Path | None = None, imports: str | Path | None = None,
         "prix_central": prediction.prix_central,
         "prix_haut": prediction.prix_haut,
         "tendance": prediction.tendance,
-        "modele_retenu": prediction.metriques.get("modele_retenu", "inconnu"),
+        "modele_retenu": prediction.metriques.get("modele_retenu", "aucun_changement"),
         "couverture_calibree": prediction.metriques.get("modele", {}).get(
             "couverture_calibree_walk_forward"
         ),

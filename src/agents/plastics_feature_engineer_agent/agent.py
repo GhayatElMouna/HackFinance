@@ -56,14 +56,17 @@ def discover_sources(raw_dir: str | Path) -> dict[str, Path | None]:
             None,
         )
 
-    imports = choose(r"comex|import|ins")
+    imports = choose(
+        r"comex|import(?:ation)?s?|ins[_-]?comex|commerce[_-]?exterieur",
+        excluded=("importance", "feature", "historique", "prediction"),
+    )
     customs = choose(r"douane|tarif|custom")
     fx = choose(r"usdtnd|tauxchange|change")
     inflation = choose(r"inflation|ipc|cpi")
     excluded = {path for path in (imports, customs, fx, inflation) if path is not None}
     pink = choose(
         r"pinksheet|worldbank|plast|dataset|matiere",
-        excluded=("comex", "import", "ins", "douane", "tarif", "custom",
+        excluded=("comex", "import", "douane", "tarif", "custom",
                   "usdtnd", "inflation", "ipc", "cpi"),
     )
     if pink is None:
@@ -241,8 +244,6 @@ def _series_features(target: pd.Series, energy: pd.DataFrame, index: pd.Datetime
     for horizon in (1, 3, 6, 12):
         frame[f"target_delta_{horizon}m"] = log_target.shift(-horizon) - log_target
         frame[f"baseline_brent_delta_{horizon}m"] = brent - brent.shift(horizon)
-    frame["target_delta_3m"] = frame["target_delta_3m"]
-    frame["baseline_brent_delta_3m"] = frame["baseline_brent_delta_3m"]
     frame.index.name = "date"
     return frame.replace([np.inf, -np.inf], np.nan)
 

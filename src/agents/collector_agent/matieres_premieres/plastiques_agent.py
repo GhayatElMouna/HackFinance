@@ -1,9 +1,13 @@
 from src.schemas import MatierePremiereOutput
 
-# STUB - a completer si le temps le permet (meme patron que ble_agent/petrole_agent)
-# Sources prevues : INS COMEX (HS 39), World Bank/IMF (petrole/gaz en amont), Min. Finances
+# Aucun benchmark public de prix des plastiques n'est configure.
 
 
 def run() -> MatierePremiereOutput:
-    """Sous-agent Plastiques (HS 39) - stub."""
-    return MatierePremiereOutput(matiere="plastiques", points=[], source="non_implemente", is_synthetic=True)
+    """Return unavailable until an official HS39 series is supplied."""
+    return MatierePremiereOutput(
+        matiere="plastiques",
+        points=[],
+        source="aucune serie web fiable configuree pour HS39",
+        is_synthetic=True,
+    )

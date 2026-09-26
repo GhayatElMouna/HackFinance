@@ -1,6 +1,12 @@
-import yfinance as yf
+from src.agents.collector_agent.official_sources import Collector, latest_wb_observation
+from src.schemas import VariableOutput
 
-df = yf.download("USDTND=X", start="2023-01-01")
-df = df[["Close"]].reset_index()
-df.columns = ["date", "usd_tnd"]
-df.to_csv("data/raw/usd_tnd.csv", index=False)
+
+def run() -> VariableOutput:
+    """Latest annual official USD/TND rate from the World Bank API."""
+    observed_on, value = latest_wb_observation(Collector(), "PA.NUS.FCRF")
+    return VariableOutput(
+        nom="usd_tnd", date=observed_on, valeur=value,
+        unite="TND/USD (moyenne annuelle)",
+        source="World Bank PA.NUS.FCRF", is_synthetic=False,
+    )

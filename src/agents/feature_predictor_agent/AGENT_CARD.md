@@ -1,28 +1,27 @@
 # Agent Feature Engineer + Predicteur
 
-**Role** : prevoit la tendance mensuelle d'un benchmark international du ble
-et permet de construire des scenarios de facteurs.
-1. Modeles : Prophet sur le log-prix mensuel, momentum 3 mois, persistance et
-   baseline saisonniere. Prophet inclut une saisonnalite annuelle et des points
-   de rupture.
-2. Evaluation : 24 origines glissantes au meme horizon que la prevision; les
-   18 premieres servent a choisir le modele par justesse directionnelle (MAPE
-   pour departager), les 6 dernieres sont un test final. L'intervalle a 80% est
-   calibre uniquement sur les residus de selection.
-3. Features : calcule les rendements, la moyenne mobile a 3 mois, la volatilite
-   et le momentum.
-4. Scenarios : estime les co-mouvements historiques Brent/uree sur 120 mois,
-   puis applique les chocs choisis par l'utilisateur. Les autres chocs restent
-   des hypotheses explicites et non des effets appris.
+**Role** : agent fusionne en deux etapes internes.
+1. Feature engineering : fusionne les sorties du Collecteur (variables +
+   matieres premieres) et du Meteo/News ; calcule moyennes mobiles,
+   volatilite glissante, momentum, variation FX par matiere.
+2. Prediction : baseline explicable qui classe la tendance (hausse / baisse /
+   stable-volatile) sur les derniers prix observes, avec un score de soutien
+   indicatif. Pas de modele supervise tant que les historiques ne sont pas
+   associes a des resultats etiquetes.
+3. Prevision de prix mensuelle : compare dernier prix et moyenne mobile 3 mois
+   sur une fenetre de selection chronologique de 12 mois, puis mesure la methode
+   retenue sur les 12 mois suivants (test final jamais utilise pour la selection).
+   Il faut au moins 36 mois valides; l'horizon est de 1 a 12 mois.
+
+La prevision expose MAE et MAPE hors echantillon ainsi qu'une plage basee sur
+l'erreur absolue mediane observee. Cette plage n'est pas un intervalle de
+confiance. Si le dernier prix gagne le backtest, la projection est plate; le
+modele ne force pas une hausse ou une baisse sans signal valide.
 
 **Input** : `CollectorOutput`, `WeatherNewsOutput`
 
 **Output** : `FeaturePredictorOutput` (voir schemas.py)
 
-**Dependances** : prophet, pandas, numpy, scikit-learn
-
-**Limite** : le benchmark World Bank US HRW en USD/tonne n'est ni le prix CIF
-tunisien ni une prevision certifiee. Les scores de direction restent indicatifs
-et doivent etre evalues sur davantage de fenetres avant tout usage budgetaire.
+**Dependances** : pandas, numpy, xgboost, scikit-learn
 
 **Responsable** : [nom]
