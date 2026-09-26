@@ -25,10 +25,18 @@ def run_pipeline(matieres: list[str], zone: str, horizon_mois: int = 1) -> Pipel
             collection_errors=[str(error)],
         )
 
-    feature_predictor_output = feature_predictor_agent.run(
-        collector_output,
-        weather_news_output,
-    )
+    try:
+        feature_predictor_output = feature_predictor_agent.run(
+            collector_output,
+            weather_news_output,
+            horizon_mois=horizon_mois,
+        )
+    except TypeError:
+        feature_predictor_output = feature_predictor_agent.run(
+            collector_output,
+            weather_news_output,
+        )
+
     explanations = explainer_agent.run(feature_predictor_output)
 
     return PipelineResult(
