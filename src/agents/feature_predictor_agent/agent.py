@@ -248,12 +248,18 @@ def run(
     weather_news: WeatherNewsOutput,
     *,
     include_synthetic: bool = False,
+    horizon_mois: int | None = None,
 ) -> FeaturePredictorOutput:
     """Build rolling features and classify observed price direction.
 
-    Confidence is a heuristic support score, not a calibrated probability. The
-    current data contract has no labeled outcomes for supervised training.
+    This function accepts both the aluminium branch API and the main-branch
+    horizon_mois argument for compatibility during merge resolution.
     """
+    if horizon_mois is None:
+        horizon_mois = 6
+    if not 1 <= horizon_mois <= 12:
+        raise ValueError("L'horizon doit etre compris entre 1 et 12 mois")
+
     weather_score = min(max(weather_news.score_risque, 0.0), 1.0)
     all_features = []
     predictions = []
@@ -268,7 +274,9 @@ def run(
             predictions.append(prediction)
         if not material.is_synthetic:
             try:
-                price_forecasts.append(forecast_monthly_price(material))
+                price_forecasts.append(
+                    forecast_monthly_price(material, horizon_months=horizon_mois)
+                )
             except ValueError:
                 pass
     return FeaturePredictorOutput(
